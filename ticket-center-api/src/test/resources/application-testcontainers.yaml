@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+  data:
+    redis:
+      password:
+  rabbitmq:
+    virtual-host: /
+
+ticket:
+  oss:
+    enabled: false

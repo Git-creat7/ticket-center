@@ -1,0 +1,17 @@
+spring:
+  data:
+    redis:
+      password: ${TICKET_REDIS_PASSWORD:}
+      timeout: 3s
+      sentinel:
+        master: ${TICKET_REDIS_MASTER:mymaster}
+        nodes: ${TICKET_REDIS_SENTINELS:redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379}
+        username: ${TICKET_REDIS_SENTINEL_USERNAME:}
+        password: ${TICKET_REDIS_SENTINEL_PASSWORD:${TICKET_REDIS_PASSWORD:}}
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 50
+          min-idle: 8
+          max-wait: 2s
+          time-between-eviction-runs: 10s

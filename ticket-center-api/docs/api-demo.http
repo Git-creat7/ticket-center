@@ -1,0 +1,63 @@
+@baseUrl = http://localhost:8080
+@phone = 13800138000
+@code = 替换为Redis中的6位验证码
+@token = 替换为登录返回的Token
+@password = 替换为8到64位密码
+@orderId = 替换为预约返回的订单ID
+
+### 1. 生成验证码
+POST {{baseUrl}}/user/code?phone={{phone}}
+
+### 2. 验证码登录
+POST {{baseUrl}}/user/login
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "code": "{{code}}"
+}
+
+### 3. 查询是否已经设置密码
+GET {{baseUrl}}/user/password/status
+authorization: {{token}}
+
+### 4. 首次设置密码
+POST {{baseUrl}}/user/password
+Content-Type: application/json
+authorization: {{token}}
+
+{
+  "password": "{{password}}"
+}
+
+### 5. 手机号密码登录
+POST {{baseUrl}}/user/login/password
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "password": "{{password}}"
+}
+
+### 6. 查询演出 1 的票档
+GET {{baseUrl}}/ticket/of/event/1
+
+### 7. 预约票档 1
+POST {{baseUrl}}/ticket-orders/reserve/1
+authorization: {{token}}
+
+### 8. 查询我的订单
+GET {{baseUrl}}/ticket-orders/me?current=1&size=10
+authorization: {{token}}
+
+### 9A. 模拟支付（与取消二选一）
+POST {{baseUrl}}/ticket-orders/pay/{{orderId}}
+authorization: {{token}}
+
+### 9B. 取消订单（与支付二选一）
+POST {{baseUrl}}/ticket-orders/cancel/{{orderId}}
+authorization: {{token}}
+
+### 10. 退出登录
+POST {{baseUrl}}/user/logout
+authorization: {{token}}

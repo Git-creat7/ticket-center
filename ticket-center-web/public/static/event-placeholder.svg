@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <linearGradient id="event-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B" />
+      <stop offset="50%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#312E81" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#event-grad)" />
+  <circle cx="400" cy="220" r="80" fill="#4F46E5" opacity="0.35" />
+  <circle cx="460" cy="180" r="50" fill="#F43F5E" opacity="0.25" />
+  <path d="M370 200 L450 200 L450 240 L370 240 Z" fill="#FFFFFF" opacity="0.8" rx="4" />
+  <circle cx="390" cy="220" r="6" fill="#0F172A" />
+  <circle cx="430" cy="220" r="6" fill="#0F172A" />
+  <text x="400" y="320" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="22" font-weight="700" fill="#94A3B8" text-anchor="middle">
+    精彩演出 · 敬请期待
+  </text>
+</svg>

@@ -1,0 +1,7 @@
+target/
+.idea/
+*.iml
+src/test/
+docs/
+application-local.yaml
+application-local.yml
