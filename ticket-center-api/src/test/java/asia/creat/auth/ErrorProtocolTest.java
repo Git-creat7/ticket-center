@@ -1,5 +1,6 @@
 package asia.creat.auth;
 
+import asia.creat.support.IntegrationTestcontainers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-public class ErrorProtocolTest {
+public class ErrorProtocolTest extends IntegrationTestcontainers {
 
     @Autowired
     private MockMvc mockMvc;

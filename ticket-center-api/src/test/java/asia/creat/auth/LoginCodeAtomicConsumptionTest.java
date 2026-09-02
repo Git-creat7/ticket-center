@@ -5,6 +5,7 @@ import asia.creat.dto.UserLoginDTO;
 import asia.creat.entity.User;
 import asia.creat.service.UserInfoService;
 import asia.creat.service.UserService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @SpringBootTest
-class LoginCodeAtomicConsumptionTest {
+class LoginCodeAtomicConsumptionTest extends IntegrationTestcontainers {
 
     private static final String PHONE = "13612340002";
     private static final String CODE = "123456";

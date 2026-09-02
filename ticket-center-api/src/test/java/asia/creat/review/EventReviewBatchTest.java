@@ -9,6 +9,7 @@ import asia.creat.entity.User;
 import asia.creat.mapper.EventMapper;
 import asia.creat.mapper.UserMapper;
 import asia.creat.service.EventReviewService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.UserHolder;
 import asia.creat.vo.EventReviewVO;
@@ -33,7 +34,7 @@ import java.util.List;
  * 详情页的"评价数"永远停在种子数据的值上。
  */
 @SpringBootTest
-public class EventReviewBatchTest {
+public class EventReviewBatchTest extends IntegrationTestcontainers {
 
     /** 作者昵称，用来断言批量组装有没有把作者填上 */
     private static final String AUTHOR_NICK = "review-batch-test";

@@ -13,6 +13,7 @@ import asia.creat.mapper.EventMapper;
 import asia.creat.mapper.UserMapper;
 import asia.creat.service.EventReviewCommentService;
 import asia.creat.service.EventReviewService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.UserHolder;
 import asia.creat.vo.EventReviewCommentVO;
@@ -42,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-class EventReviewCommentTest {
+class EventReviewCommentTest extends IntegrationTestcontainers {
 
     @Autowired
     private EventReviewService reviewService;

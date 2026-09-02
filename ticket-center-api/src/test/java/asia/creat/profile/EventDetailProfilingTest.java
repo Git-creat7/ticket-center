@@ -6,6 +6,7 @@ import asia.creat.entity.Ticket;
 import asia.creat.mapper.EventCategoryMapper;
 import asia.creat.mapper.TicketMapper;
 import asia.creat.service.EventService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.CacheClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ import static asia.creat.utils.RedisConstants.CACHE_EVENT_TTL;
 import static asia.creat.utils.RedisConstants.UV_EVENT_KEY;
 
 @SpringBootTest
-public class EventDetailProfilingTest {
+public class EventDetailProfilingTest extends IntegrationTestcontainers {
 
     @Autowired
     private CacheClient cacheClient;

@@ -1,6 +1,7 @@
 package asia.creat.profile;
 
 import asia.creat.service.EventService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.vo.EventDetailVO;
 import asia.creat.vo.TicketVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,7 +15,7 @@ import static asia.creat.utils.RedisConstants.CACHE_EVENT_DETAIL_KEY;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
-public class EventDetailSerializationTest {
+public class EventDetailSerializationTest extends IntegrationTestcontainers {
 
     @Autowired
     private EventService eventService;

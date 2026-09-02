@@ -1,6 +1,7 @@
 package asia.creat.auth;
 
 import asia.creat.service.EventService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -23,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-public class PublicEndpointTest {
+public class PublicEndpointTest extends IntegrationTestcontainers {
 
     private static final long UV_EVENT_ID = 999_999_992L;
 

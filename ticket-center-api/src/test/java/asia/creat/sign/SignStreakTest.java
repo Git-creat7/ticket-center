@@ -2,6 +2,7 @@ package asia.creat.sign;
 
 import asia.creat.dto.UserDTO;
 import asia.creat.service.SignService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.UserHolder;
 import asia.creat.vo.SignDayVO;
@@ -25,7 +26,7 @@ import java.util.List;
  * 上月连签一整月、本月又连签到今天，显示的却只是本月的天数。
  */
 @SpringBootTest
-public class SignStreakTest {
+public class SignStreakTest extends IntegrationTestcontainers {
 
     private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("yyyyMM");
 

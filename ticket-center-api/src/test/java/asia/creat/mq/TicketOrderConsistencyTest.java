@@ -11,6 +11,7 @@ import asia.creat.mapper.TicketMapper;
 import asia.creat.mapper.TicketOrderMapper;
 import asia.creat.mapper.TicketStockMapper;
 import asia.creat.service.TicketOrderService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.TicketReservationScript;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
@@ -22,7 +23,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import java.time.LocalDateTime;
 
 @SpringBootTest
-public class TicketOrderConsistencyTest {
+public class TicketOrderConsistencyTest extends IntegrationTestcontainers {
 
     @Autowired
     private TicketOrderDeadConsumer ticketOrderDeadConsumer;

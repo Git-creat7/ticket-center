@@ -7,6 +7,7 @@ import asia.creat.entity.User;
 import asia.creat.mapper.FollowMapper;
 import asia.creat.mapper.UserMapper;
 import asia.creat.service.FollowService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.UserHolder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -37,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-public class FollowCountTest {
+public class FollowCountTest extends IntegrationTestcontainers {
 
     private static final Long ACTOR = 88_831L;
     private static final List<Long> TARGETS = List.of(88_832L, 88_833L, 88_834L);

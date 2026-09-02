@@ -12,6 +12,7 @@ import asia.creat.mapper.FollowMapper;
 import asia.creat.mapper.UserMapper;
 import asia.creat.service.EventReviewService;
 import asia.creat.service.FollowService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.UserHolder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -31,7 +32,7 @@ import java.util.List;
 import java.util.Set;
 
 @SpringBootTest
-public class FollowFeedTest {
+public class FollowFeedTest extends IntegrationTestcontainers {
 
     @Autowired
     private FollowService followService;

@@ -2,6 +2,7 @@ package asia.creat.auth;
 
 import asia.creat.entity.User;
 import asia.creat.mapper.UserMapper;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-public class AdminAuthTest {
+public class AdminAuthTest extends IntegrationTestcontainers {
 
     @Autowired
     private MockMvc mockMvc;

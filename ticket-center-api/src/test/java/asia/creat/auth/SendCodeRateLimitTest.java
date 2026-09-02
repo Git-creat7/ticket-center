@@ -3,6 +3,7 @@ package asia.creat.auth;
 import asia.creat.common.exception.BusinessException;
 import asia.creat.mapper.UserInfoMapper;
 import asia.creat.service.UserService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -27,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-public class SendCodeRateLimitTest {
+public class SendCodeRateLimitTest extends IntegrationTestcontainers {
 
     private static final String PHONE = "13612340001";
 

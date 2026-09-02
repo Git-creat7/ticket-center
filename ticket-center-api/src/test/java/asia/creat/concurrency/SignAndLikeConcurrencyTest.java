@@ -8,6 +8,7 @@ import asia.creat.service.CreditLogService;
 import asia.creat.service.EventReviewService;
 import asia.creat.service.SignService;
 import asia.creat.service.UserInfoService;
+import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.UserHolder;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -28,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @SpringBootTest
-public class SignAndLikeConcurrencyTest {
+public class SignAndLikeConcurrencyTest extends IntegrationTestcontainers {
 
     private static final int CONCURRENCY = 20;
 

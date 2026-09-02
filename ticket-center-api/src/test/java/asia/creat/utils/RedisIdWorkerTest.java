@@ -1,5 +1,6 @@
 package asia.creat.utils;
 
+import asia.creat.support.IntegrationTestcontainers;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,7 @@ import java.time.ZonedDateTime;
  * 唯一后果就是这里断言的这件事——按 ID 对账会对到错的时间。
  */
 @SpringBootTest
-public class RedisIdWorkerTest {
+public class RedisIdWorkerTest extends IntegrationTestcontainers {
 
     /** 反解允许的误差：覆盖测试自身的执行耗时 */
     private static final long TOLERANCE_SECONDS = 120L;
