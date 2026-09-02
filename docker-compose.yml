@@ -1,0 +1,233 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ticket-mysql
+    ports:
+      # 宿主端使用 3306
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set}"
+      MYSQL_DATABASE: ticket_center
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./ticket-center-api/src/main/resources/db/ticket.sql:/docker-entrypoint-initdb.d/01-ticket.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ticket-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    environment:
+      REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${TICKET_REDIS_PASSWORD}"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  redis-replica-1:
+    image: redis:7-alpine
+    container_name: ticket-redis-replica-1
+    environment:
+      REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379", "--masterauth", "${TICKET_REDIS_PASSWORD}", "--requirepass", "${TICKET_REDIS_PASSWORD}"]
+    volumes:
+      - redis-replica-1-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis-replica-2:
+    image: redis:7-alpine
+    container_name: ticket-redis-replica-2
+    environment:
+      REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379", "--masterauth", "${TICKET_REDIS_PASSWORD}", "--requirepass", "${TICKET_REDIS_PASSWORD}"]
+    volumes:
+      - redis-replica-2-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: ticket-redis-sentinel-1
+    environment:
+      REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+    ports:
+      - "127.0.0.1:26379:26379"
+    volumes:
+      - redis-sentinel-1-data:/data
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s\n' \
+          'port 26379' \
+          'sentinel resolve-hostnames yes' \
+          'sentinel monitor mymaster redis 6379 2' \
+          "sentinel auth-pass mymaster $${REDIS_PASSWORD}" \
+          "requirepass $${REDIS_PASSWORD}" \
+          'sentinel down-after-milliseconds mymaster 5000' \
+          'sentinel failover-timeout mymaster 60000' \
+          'sentinel parallel-syncs mymaster 1' > /data/sentinel.conf.tmp
+        if [ ! -s /data/sentinel.conf ]; then mv /data/sentinel.conf.tmp /data/sentinel.conf; else rm -f /data/sentinel.conf.tmp; fi
+        exec redis-server /data/sentinel.conf --sentinel
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_started
+      redis-replica-2:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli -p 26379 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    container_name: ticket-redis-sentinel-2
+    environment:
+      REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+    ports:
+      - "127.0.0.1:26380:26379"
+    volumes:
+      - redis-sentinel-2-data:/data
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s\n' \
+          'port 26379' \
+          'sentinel resolve-hostnames yes' \
+          'sentinel monitor mymaster redis 6379 2' \
+          "sentinel auth-pass mymaster $${REDIS_PASSWORD}" \
+          "requirepass $${REDIS_PASSWORD}" \
+          'sentinel down-after-milliseconds mymaster 5000' \
+          'sentinel failover-timeout mymaster 60000' \
+          'sentinel parallel-syncs mymaster 1' > /data/sentinel.conf.tmp
+        if [ ! -s /data/sentinel.conf ]; then mv /data/sentinel.conf.tmp /data/sentinel.conf; else rm -f /data/sentinel.conf.tmp; fi
+        exec redis-server /data/sentinel.conf --sentinel
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_started
+      redis-replica-2:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli -p 26379 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    container_name: ticket-redis-sentinel-3
+    environment:
+      REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+    ports:
+      - "127.0.0.1:26381:26379"
+    volumes:
+      - redis-sentinel-3-data:/data
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s\n' \
+          'port 26379' \
+          'sentinel resolve-hostnames yes' \
+          'sentinel monitor mymaster redis 6379 2' \
+          "sentinel auth-pass mymaster $${REDIS_PASSWORD}" \
+          "requirepass $${REDIS_PASSWORD}" \
+          'sentinel down-after-milliseconds mymaster 5000' \
+          'sentinel failover-timeout mymaster 60000' \
+          'sentinel parallel-syncs mymaster 1' > /data/sentinel.conf.tmp
+        if [ ! -s /data/sentinel.conf ]; then mv /data/sentinel.conf.tmp /data/sentinel.conf; else rm -f /data/sentinel.conf.tmp; fi
+        exec redis-server /data/sentinel.conf --sentinel
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-replica-1:
+        condition: service_started
+      redis-replica-2:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli -p 26379 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ticket-rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: "${TICKET_RABBITMQ_USERNAME:?TICKET_RABBITMQ_USERNAME must be set}"
+      RABBITMQ_DEFAULT_PASS: "${TICKET_RABBITMQ_PASSWORD:?TICKET_RABBITMQ_PASSWORD must be set}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    profiles: ["full"]
+    build:
+      context: ./ticket-center-api
+    container_name: ticket-backend
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: "${SPRING_PROFILES_ACTIVE:-sentinel}"
+      DB_URL: "jdbc:mysql://mysql:3306/ticket_center?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      DB_USERNAME: root
+      DB_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set}"
+      TICKET_REDIS_HOST: redis
+      TICKET_REDIS_MASTER: mymaster
+      TICKET_REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      TICKET_REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
+      TICKET_RABBITMQ_HOST: rabbitmq
+      TICKET_RABBITMQ_USERNAME: "${TICKET_RABBITMQ_USERNAME:?TICKET_RABBITMQ_USERNAME must be set}"
+      TICKET_RABBITMQ_PASSWORD: "${TICKET_RABBITMQ_PASSWORD:?TICKET_RABBITMQ_PASSWORD must be set}"
+    volumes:
+      - backend-uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_healthy
+      redis-sentinel-2:
+        condition: service_healthy
+      redis-sentinel-3:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  redis-data:
+  redis-replica-1-data:
+  redis-replica-2-data:
+  redis-sentinel-1-data:
+  redis-sentinel-2-data:
+  redis-sentinel-3-data:
+  rabbitmq-data:
+  backend-uploads:

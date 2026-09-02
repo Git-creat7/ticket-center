@@ -1,0 +1,99 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: ticket-center
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:./application-local.yaml
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/ticket_center?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+  data:
+    redis:
+      host: ${TICKET_REDIS_HOST:localhost}
+      port: ${TICKET_REDIS_PORT:6379}
+      password: ${TICKET_REDIS_PASSWORD:}
+      timeout: 3s
+      lettuce:
+        pool:
+          # max-active 原为 10：Tomcat 默认 200 个工作线程，每条连接后面排着约 20 个请求。
+          # 签到接口实测每次 Redis 往返边际成本 11.9 ms，而 Redis 自报 usec_per_call 只有
+          # 2~15 微秒——差三个数量级，那 11.9 ms 基本全是池等待。放到 50 让排队深度降到 4。
+          max-active: 50
+          max-idle: 50
+          # min-idle 原为 1：空闲回收后突发流量要现建 49 条连接，握手全压在请求路径上
+          min-idle: 8
+          max-wait: 2s
+          time-between-eviction-runs: 10s
+
+  rabbitmq:
+    host: ${TICKET_RABBITMQ_HOST:localhost}
+    port: ${TICKET_RABBITMQ_PORT:5672}
+    username: ${TICKET_RABBITMQ_USERNAME:}
+    password: ${TICKET_RABBITMQ_PASSWORD:}
+    virtual-host: ${TICKET_RABBITMQ_VHOST:/}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        concurrency: 5
+        max-concurrency: 10
+        prefetch: 10
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 5s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
+
+  jackson:
+    default-property-inclusion: non_null
+
+
+
+mybatis-plus:
+  type-aliases-package: asia.creat.entity
+logging:
+  level:
+    asia.creat: debug
+ticket:
+  oss:
+    enabled: ${TICKET_OSS_ENABLED:false}
+    endpoint: ${TICKET_OSS_ENDPOINT:https://oss-cn-beijing.aliyuncs.com}
+    bucket-name: ${TICKET_OSS_BUCKET:}
+    public-domain: ${TICKET_OSS_PUBLIC_DOMAIN:}
+    object-prefix: ${TICKET_OSS_OBJECT_PREFIX:uploads}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    security-token: ${TICKET_OSS_SECURITY_TOKEN:${ALIBABA_CLOUD_SECURITY_TOKEN:}}
+    cli-profile: ${TICKET_OSS_CLI_PROFILE:}
+
+management:
+  # 独立管理端口，且 compose 不发布它，因此从宿主机无法访问。
+  # MVC 拦截器挡不住 actuator：WebMvcConfigurer 注册的拦截器只绑在
+  # RequestMappingHandlerMapping 上，actuator 走的是 WebMvcEndpointHandlerMapping，
+  # 靠路径白名单根本拦不住，只能靠不暴露端口或引入 Spring Security。
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never

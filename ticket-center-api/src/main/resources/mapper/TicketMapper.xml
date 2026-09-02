@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="asia.creat.mapper.TicketMapper">
+
+    <select id="queryTicketOfEvent" resultType="asia.creat.entity.Ticket" parameterType="java.lang.Long">
+        SELECT
+            t.id, t.event_id, t.title, t.price, t.original_price, t.type,
+            t.status, s.stock, s.begin_time, s.end_time
+        FROM tb_ticket t
+        LEFT JOIN tb_ticket_stock s ON t.id = s.ticket_id
+        WHERE t.event_id = #{eventId} AND t.status = 1
+        ORDER BY t.price DESC
+    </select>
+</mapper>

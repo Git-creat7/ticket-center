@@ -1,0 +1,114 @@
+# ====================================================================
+# Ticket Center - Git Ignore Configuration
+# ====================================================================
+
+# 编译构建与依赖 (Build Artifacts & Dependencies)
+target/
+**/target/
+build/
+**/build/
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+out/
+**/out/
+node_modules/
+**/node_modules/
+*.class
+*.jar
+*.war
+*.ear
+
+
+# 日志与运行时临时文件 (Logs & Runtime Files)
+*.log
+*.pid
+*.out
+*.err
+logs/
+**/logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+jmeter.log
+**/jmeter.log
+
+
+# IDE 与编辑器配置 (IDE & Editors)
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+!.vscode/extensions.json
+.settings/
+.project
+.classpath
+.factorypath
+.springBeans
+.sts4-cache
+.apt_generated
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+# 操作系统临时文件 (OS Metadata)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+
+# 本地环境与敏感配置文件 (Local Environment & Secrets)
+.env
+.env.*
+!.env.example
+application-local.yaml
+application-local.yml
+**/application-local.yaml
+**/application-local.yml
+
+    
+# 本地动态上传文件与容器数据 (Uploads & Docker Data)
+uploads/
+**/uploads/
+!ticket-center-web/public/imgs/**
+data/
+
+# 本地 AI 辅助工具与 Agent 运行时目录
+.agent/
+.agents/
+.claude/
+.codex/
+.gemini/
+.gstack/
+.codegraph/
+.playwright-mcp/
+.cursor/
+.continue/
+.windsurf/
+.roo/
+.aider*
+
+# JMeter 压测运行时明细日志与阶段产物
+benchmark/results/
+benchmark/results_*/
+
+# JMeter 生成产物：HTML 报告内含大量第三方静态资源，token 由 generate_tokens.py 现生成
+benchmark/reports/
+benchmark/jmeter_tokens.csv
+
+# 直接在 benchmark/ 下跑单个 .jmx 时落的原始样本与 rtt_probe.sh 的输出
+benchmark/*.jtl
+benchmark/*.log
+benchmark/rtt_probe_*.txt
+
+docs/TASK-perf-tuning.md
