@@ -23,12 +23,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * 管理接口的权限校验。
- *
- * 修复前 POST /event、PUT /event、POST /ticket 只要求登录：任何注册用户都能建活动、加票档。
- * 这些用例都是 web 层的（拦截器装配、注解识别、拦截器相对登录的顺序），service 层测不到。
- */
+// 管理接口的权限校验。
 @SpringBootTest
 @AutoConfigureMockMvc
 public class AdminAuthTest extends IntegrationTestcontainers {
@@ -117,14 +112,7 @@ public class AdminAuthTest extends IntegrationTestcontainers {
                 .andExpect(jsonPath("$.msg").value("未登录或登录已过期"));
     }
 
-    /**
-     * 管理员应当穿过拦截器进入参数校验。
-     *
-     * 这里刻意发空 body：断的是"权限已放行"，不依赖任何活动/票档测试数据。
-     * 拦截器拒绝时写的是真实 HTTP 403（body.code 同为 403），而业务异常统一走
-     * GlobalExceptionHandler、HTTP 仍是 200、错误码在 body 的 code 里 ——
-     * 所以放行的标志是 200 + code 400，靠状态码区分，不靠 body.code。
-     */
+    // 管理员应通过拦截器并进入参数校验。
     @Test
     @DisplayName("管理员创建活动应穿过权限校验，落到参数校验")
     void testCreateEvent_AsAdmin_ShouldPassAuthorization() throws Exception {
@@ -138,10 +126,7 @@ public class AdminAuthTest extends IntegrationTestcontainers {
                 .andExpect(jsonPath("$.code").value(400));
     }
 
-    /**
-     * 同一路径上的 GET 是公开的，不能被管理员校验波及。
-     * 这是用注解而非路径配置的原因，退回按路径拦会让这条用例失败。
-     */
+    // 同一路径上的 GET 保持公开。
     @Test
     @DisplayName("公开的 GET /event/{id} 不受管理员校验影响")
     void testQueryEvent_IsStillPublic() throws Exception {

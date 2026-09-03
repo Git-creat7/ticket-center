@@ -61,8 +61,7 @@ public class EventDetailSerializationTest extends IntegrationTestcontainers {
         System.out.println(cacheHttpJson);
         System.out.println("===============================================================");
 
-        // 6. 深入断言
-        // (1) 顶层时间字段断言
+        // 6. 深入断言：顶层时间字段和缓存结构。
         assertEquals(dbVo.getStartTime(), cacheVo.getStartTime(), "演出 startTime 必须完全一致");
 
         // (2) 票档列表非空与泛型类型断言

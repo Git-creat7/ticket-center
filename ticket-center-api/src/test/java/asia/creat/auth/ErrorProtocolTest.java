@@ -12,12 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * 错误响应协议的边界（第 14、15 条）。
- *
- * 业务错误走「HTTP 200 + body.code」，只有拦截器鉴权与静态资源缺失用真实状态码。
- * 这条边界原先没有任何用例守着，缺失的图片因此被 Exception 兜底吞成 500。
- */
+// 错误响应协议的边界。
 @SpringBootTest
 @AutoConfigureMockMvc
 public class ErrorProtocolTest extends IntegrationTestcontainers {
@@ -35,9 +30,7 @@ public class ErrorProtocolTest extends IntegrationTestcontainers {
     @Test
     @DisplayName("业务错误仍是 HTTP 200 + body.code，不能改成真实状态码")
     void testBusinessError_StaysHttp200WithBodyCode() throws Exception {
-        // 演出不存在：BusinessException(404, ...) -> body.code=404 但 HTTP 仍为 200。
-        // 前端 http.ts 的错误分支只在 2xx 上读 body.msg，
-        // 改成真实 404 会让后端文案被 axios 的通用报错覆盖。
+        // 业务异常保留 HTTP 200，具体错误码放在响应体中。
         mockMvc.perform(get("/event/999999999"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(404));

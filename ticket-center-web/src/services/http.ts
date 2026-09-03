@@ -59,10 +59,7 @@ http.interceptors.response.use(
   (response) => {
     const envelope = response.data as Partial<ApiEnvelope<unknown>>
 
-    // 后端所有接口都返回 { code, msg, data }。拿不到 code 说明这个 200
-    // 压根不是后端给的——代理配错、网关错误页、dev server 的 SPA fallback
-    // 都会回 200 + HTML。放过去的话 apiRequest 取出 undefined 当成功值往上传，
-    // 界面显示空白且无任何报错，极难定位。
+    // 缺少 code 说明 200 响应不是后端统一响应体。
     if (typeof envelope?.code !== 'number') {
       return Promise.reject(
         new ApiError('响应格式异常，请确认接口地址与代理配置', -1, response.status),
@@ -77,9 +74,7 @@ http.interceptors.response.use(
   (error: AxiosError) => {
     if (error.response?.status === 401) unauthorizedHandler?.()
 
-    // 非 2xx 也可能带 { code, msg } 体：拦截器鉴权失败走的就是这条路
-    // （401 未登录、403 需要管理员权限）。直接抛 AxiosError 的话界面上
-    // 显示的是 "Request failed with status code 403"，后端写的 msg 就白写了。
+    // 非 2xx 也读取统一响应体，保留后端返回的错误信息。
     const envelope = error.response?.data as Partial<ApiEnvelope<unknown>> | undefined
     if (typeof envelope?.code === 'number') {
       return Promise.reject(new ApiError(envelope.msg || '请求失败', envelope.code, error.response?.status))

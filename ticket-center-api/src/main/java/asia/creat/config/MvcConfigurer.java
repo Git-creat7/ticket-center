@@ -25,7 +25,7 @@ public class MvcConfigurer implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        // 登录拦截器：注册在所有路径上，放行名单见 PublicEndpoints（按“方法 + 路径”匹配）。
+        // 登录拦截器：注册在所有路径上，放行名单 PublicEndpoints
         registry.addInterceptor(new LoginInterceptor(objectMapper)).order(1);
 
         // Token 刷新拦截器：对所有请求尝试解析 Token 并刷新 TTL

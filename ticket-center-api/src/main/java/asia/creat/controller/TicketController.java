@@ -24,7 +24,7 @@ public class TicketController {
     private final TicketService ticketService;
 
     @GetMapping("/of/event/{eventId}")
-    public Result queryTicketOfEvent(@PathVariable("eventId") Long eventId) {
+    public Result queryTicketOfEvent(@PathVariable Long eventId) {
         List<TicketVO> tickets = ticketService.queryTicketOfEvent(eventId);
         return Result.success(tickets);
     }

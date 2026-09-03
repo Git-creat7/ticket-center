@@ -22,10 +22,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * 图片对象存储服务：封装阿里云 OSS 的上传与删除，以及 key 生成和地址校验。
- * Controller 只负责参数绑定与结果包装，存储细节与可替换性收敛在本类。
- */
 @Slf4j
 @Service
 @ConditionalOnProperty(prefix = "ticket.oss", name = "enabled", havingValue = "true")
@@ -50,12 +46,6 @@ public class OssStorageService {
         this.objectPrefix = normalizePrefix(objectPrefix);
     }
 
-    /**
-     * 上传图片，返回可访问的完整 URL。
-     *
-     * @throws IllegalArgumentException 参数或格式不合法
-     * @throws IllegalStateException    OSS 存储失败
-     */
     public String uploadImage(MultipartFile image) {
         if (image == null || image.isEmpty()) {
             throw new IllegalArgumentException("请选择要上传的图片");
@@ -83,12 +73,6 @@ public class OssStorageService {
         }
     }
 
-    /**
-     * 删除图片（接受完整 URL 或对象 key）。
-     *
-     * @throws IllegalArgumentException 地址不属于本项目或格式不合法
-     * @throws IllegalStateException    OSS 存储失败
-     */
     public void deleteImage(String imageUrl) {
         try {
             String objectKey = extractObjectKey(imageUrl);

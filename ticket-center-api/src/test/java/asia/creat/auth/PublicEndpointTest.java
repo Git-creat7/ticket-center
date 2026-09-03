@@ -19,9 +19,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * 放行名单改成“方法 + 路径”后的回归（第 7 条）与匿名 UV 去重（第 10 条）。
- */
+// 公开端点与匿名 UV 去重。
 @SpringBootTest
 @AutoConfigureMockMvc
 public class PublicEndpointTest extends IntegrationTestcontainers {
@@ -63,10 +61,7 @@ public class PublicEndpointTest extends IntegrationTestcontainers {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 同一路径上 GET 公开、写方法需鉴权 —— 这是把方法写进白名单的目的。
-     * /user/{id} 需登录，而 /event/{id} 公开，两者路径形状相同，靠方法与具体路径区分。
-     */
+    // GET 公开，写方法需要鉴权。
     @Test
     @DisplayName("同形状路径不会被整片放行")
     void testSameShapePaths_AreNotBlanketExcluded() throws Exception {
@@ -74,10 +69,7 @@ public class PublicEndpointTest extends IntegrationTestcontainers {
         mockMvc.perform(get("/user/1")).andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 修复前每次请求生成一个新 UUID，HLL 每次都 +1。
-     * 现在按 IP 去重，同一 IP 连打 50 次只能算 1 个访客。
-     */
+    // 同一 IP 重复访问只计一个访客。
     @Test
     @DisplayName("同一 IP 反复上报 UV 只计一次")
     void testAddUv_SameIp_CountsOnce() {
@@ -105,10 +97,7 @@ public class PublicEndpointTest extends IntegrationTestcontainers {
         Assertions.assertEquals(0L, eventService.queryUv(UV_EVENT_ID));
     }
 
-    /**
-     * PUT /event/uv/{id} 仍应免登录（游客也算想看人数），
-     * 且经由控制层拿到 MockMvc 的 remoteAddr 后能真正累加。
-     */
+    // 游客可以上报 UV。
     @Test
     @DisplayName("PUT /event/uv 免登录且按请求 IP 去重")
     void testAddUvEndpoint_IsPublicAndDeduped() throws Exception {

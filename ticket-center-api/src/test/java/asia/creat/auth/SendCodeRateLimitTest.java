@@ -23,9 +23,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * 验证码限流（第 8 条）与 GET /user/info 不写库（第 9 条）。
- */
+// 验证码限流与用户信息查询。
 @SpringBootTest
 @AutoConfigureMockMvc
 public class SendCodeRateLimitTest extends IntegrationTestcontainers {
@@ -57,10 +55,7 @@ public class SendCodeRateLimitTest extends IntegrationTestcontainers {
         }
     }
 
-    /**
-     * 只写登录态 Hash，不建 tb_user 行。
-     * /user/info/{id} 没有管理员校验，拦截器链不会回查用户表，够用了。
-     */
+    // 只准备登录态，不创建用户表记录。
     private String loginToken(long userId) {
         String token = UUID.randomUUID().toString().replace("-", "");
         createdTokenKey = RedisConstants.LOGIN_USER_KEY + token;
@@ -115,10 +110,7 @@ public class SendCodeRateLimitTest extends IntegrationTestcontainers {
                 "第二次发送不应把窗口续到 24 小时，否则单日上限永远达不到，实际 TTL=" + ttl);
     }
 
-    /**
-     * 修复前这个 GET 会为任意 userId 建一行 tb_user_info：
-     * PersonPage 用 URL 上的 id 直接调它，遍历一遍就能把表刷满。
-     */
+    // 查询缺失信息时不应写库。
     @Test
     @DisplayName("GET /user/info 查询不存在的用户不应落库")
     void testQueryUserInfo_WhenMissing_ShouldNotPersist() throws Exception {

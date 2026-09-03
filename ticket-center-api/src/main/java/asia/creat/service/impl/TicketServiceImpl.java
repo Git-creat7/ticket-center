@@ -54,11 +54,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
         Long eventId = createDTO.getEventId();
         String stock = createDTO.getStock().toString();
 
-        // 两个 Redis 操作都必须等事务提交后再做：
-        // 库存 key 若在事务内写入，事务回滚后 key 仍留在 Redis，
-        // 成为一个数据库里并不存在的票档的幽灵库存，可以被预约脚本扣减；
-        // 详情缓存若在事务内删除，删除到提交之间的并发读会把旧值重新写回，
-        // 反而留下一份能存活整个 TTL 的陈旧数据。
+        // Redis 状态在事务提交后同步，避免回滚留下脏缓存。
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {

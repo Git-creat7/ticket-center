@@ -35,9 +35,6 @@ public class FileStorageService {
     @Autowired(required = false)
     private OssStorageService ossStorageService;
 
-    /**
-     * 上传图片，优先使用 OSS，未启用 OSS 时保存在本地磁盘 uploads 目录
-     */
     public String uploadImage(MultipartFile image) {
         if (image == null || image.isEmpty()) {
             throw new IllegalArgumentException("请选择要上传的图片");
@@ -80,12 +77,6 @@ public class FileStorageService {
         }
     }
 
-    /**
-     * 生成带归属标记的文件名：{userId}-{uuid}.{ext}
-     *
-     * 删除时只认文件名里的这个 userId，所以归属信息必须落在路径本身：
-     * 图片在评价发布前就能被撤回，此时它还没进任何数据库记录，没有别的地方可查归属。
-     */
     private String buildOwnedFileName(String normalizedSuffix) {
         UserDTO user = UserHolder.getUser();
         if (user == null || user.getId() == null) {
@@ -94,12 +85,6 @@ public class FileStorageService {
         return user.getId() + "-" + UUID.randomUUID().toString().replace("-", "") + "." + normalizedSuffix;
     }
 
-    /**
-     * 校验图片归属：文件名前缀里的 userId 必须是当前调用者。
-     *
-     * 修复前这里只要求登录：图片 URL 通过评价接口公开可见，
-     * 任何登录用户抓一遍别人的评价就能把他的图全删掉。
-     */
     private boolean isOwnedByCurrentUser(String imageUrl) {
         UserDTO user = UserHolder.getUser();
         if (user == null || user.getId() == null) {
@@ -114,9 +99,6 @@ public class FileStorageService {
         return fileName.substring(0, dash).equals(String.valueOf(user.getId()));
     }
 
-    /**
-     * 删除图片
-     */
     public void deleteImage(String imageUrl) {
         if (!StringUtils.hasText(imageUrl)) {
             return;

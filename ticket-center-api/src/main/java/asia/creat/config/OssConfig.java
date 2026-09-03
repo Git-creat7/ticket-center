@@ -51,7 +51,7 @@ public class OssConfig {
             return createCredentials(accessKeyId, accessKeySecret, securityToken);
         }
 
-        // Local development can reuse the active Alibaba Cloud CLI profile.
+        // 本地开发可复用 Alibaba Cloud CLI 的当前配置。
         return loadCliCredentials(cliProfile, objectMapper);
     }
 

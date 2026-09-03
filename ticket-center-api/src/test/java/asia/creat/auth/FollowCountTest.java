@@ -30,12 +30,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * 关注数与粉丝数（第 16 条）。
- *
- * tb_user_info.fans / followee 只在建行时写 0，关注与取关从不维护，
- * 而两个页面都把它们当实时计数展示，于是永远显示 0。
- */
+// 关注数与粉丝数。
 @SpringBootTest
 @AutoConfigureMockMvc
 public class FollowCountTest extends IntegrationTestcontainers {
@@ -60,13 +55,7 @@ public class FollowCountTest extends IntegrationTestcontainers {
 
     private String token;
 
-    /**
-     * 被关注方也必须真的落库。
-     *
-     * 原来只建了 ACTOR，TARGETS 从没插过 —— 用例能过是因为 follow() 当时不校验目标存在性，
-     * 关注三个虚构 id 也照样写库。补上存在性校验后这里就会抛「目标用户不存在」。
-     * cleanUp 里本来就在 deleteById(target)，不用另外清。
-     */
+    // 被关注方必须真实存在。
     @BeforeEach
     void setUp() {
         TARGETS.forEach(this::insertUser);
@@ -109,8 +98,7 @@ public class FollowCountTest extends IntegrationTestcontainers {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.fans").value(1));
 
-        // MockMvc 请求走完拦截器链，afterCompletion 会清掉 UserHolder，
-        // 直接调 service 前要重新放回当前用户
+        // MockMvc 完成后会清理 UserHolder，直接调用 service 前重新设置用户。
         holdUser(ACTOR);
         followService.follow(target, false);
 

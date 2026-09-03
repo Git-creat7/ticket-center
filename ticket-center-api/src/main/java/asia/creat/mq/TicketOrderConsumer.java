@@ -31,12 +31,6 @@ public class TicketOrderConsumer {
                 RedisConstants.LOCK_ORDER_KEY + message.getUserId()
         );
 
-        // 有界等待，不是立即失败。
-        // 锁冲突的语义是“这条消息稍后再处理”，而不是“这单不能落库”：
-        // 原先 tryLock() 拿不到就抛异常，重试 3 次仍冲突就进死信，死信消费者查库
-        // 发现确实没这单，于是回滚 Redis —— 用户明明抢到了，资格被系统自己收走。
-        // 等 5 秒能吸收绝大多数瞬时冲突（createTicketOrder 本身是毫秒级的）。
-        // 不传 leaseTime，交给 Redisson 看门狗续期，避免落库慢于租期时锁被提前释放。
         boolean locked;
         try {
             locked = lock.tryLock(RedisConstants.LOCK_ORDER_WAIT.toSeconds(), TimeUnit.SECONDS);
@@ -63,7 +57,7 @@ public class TicketOrderConsumer {
                         .build();
                 ticketOrderProducer.sendDelayCancelMessage(cancelMessage);
             } catch (Exception e) {
-                // 订单已成功落库，严禁向上抛出异常导致事务重试或误入死信；若延时消息丢失，由后台定时任务 releaseTimeoutOrders 兜底关单
+                // 订单已落库，延时消息失败由定时任务兜底。
                 log.error("【延时消息发送失败】订单已成功落库，但投递延时关单消息异常，orderId={} (将由定时扫库任务自动兜底)",
                         message.getId(), e);
             }

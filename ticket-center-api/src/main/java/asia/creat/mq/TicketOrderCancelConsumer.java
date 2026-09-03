@@ -8,14 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
-/**
- * 订单超时自动关单消费者：
- * 监听经 TTL 延时缓冲队列（15分钟）死信转发而来的关单消息，
- * 检查订单支付状态，对超时未支付订单自动流转状态为已取消并双向释放 MySQL 与 Redis 库存。
- *
- * 【设计契约】：
- * 延时关单处理若出现异常，记录错误日志，由后台定时扫库任务 releaseTimeoutOrders 负责最终一致性兜底。
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor

@@ -30,9 +30,9 @@
 - [x] **压测调优叙事**：详情页从"伪缓存"到聚合视图缓存，QPS 从 565.6 提升至均值 3,597（四轮 3,210~4,246），平均耗时从 266ms 降至 24~36ms；完成 Step 0 实测拆解、变量隔离与噪声基准测量（见 `benchmark/BENCHMARK_REPORT.md`）
 - [x] **配置 Actuator**：已在 `application.yaml` 暴露 `health,info,metrics` 端点
 - [x] **签到接口性能回归已结案**：原因是按位逐次打 Redis（每请求 12 次往返），不是当时怀疑的 Actuator 埋点。改成整月位图读一次、内存里算位后，稳态 1,206 → 3,374 QPS、147 → 40 ms（见优化记录 14）
-- [ ] Testcontainers 改造：现有集成测试依赖手动启动的中间件，CI 无法执行（`TicketOrderConsistencyTest`、`EventDetailProfilingTest`、`EventDetailSerializationTest` 均需 MySQL/Redis/RabbitMQ 就绪，且依赖 `event_id=1` 存在票档数据）
+- [x] **Testcontainers 改造**：`src/test/java/asia/creat/support/IntegrationTestcontainers.java` 统一起 mysql:8.4（`withInitScript("db/ticket.sql")`）、redis:7-alpine、rabbitmq:3.13-management，`@DynamicPropertySource` 注入随机映射端口，集成测试不再依赖手动启动的中间件，也不再受本机 3306 占用影响
 - [x] 后端 Dockerfile + 纳入 docker-compose，实现一条命令跑起全栈
-- [ ] GitHub Actions：`mvn test` + `npm run build`
+- [x] **GitHub Actions**：`.github/workflows/ci.yml` 两个 job，后端 `mvn -B test`（Testcontainers 跑全量集成测试）、前端 `npm ci` + `npm run build`，无 `continue-on-error`
 - [ ] 积分抵扣上限 `1000L` 抽为常量（`TicketOrderServiceImpl.java:194`）
 - [ ] Lua 区分"缓存未预热"与"库存售罄"的返回码
 - [x] **修复删除图片的路径穿越漏洞**（见优化记录 8）

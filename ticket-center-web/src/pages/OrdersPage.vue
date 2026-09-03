@@ -36,8 +36,7 @@ const selectedStatus = computed(() => (
   filterOptions.find((option) => option.value === selectedFilter.value)?.status ?? null
 ))
 
-// status 已下推到后端查询，这里直接用返回结果；
-// 再做一次前端过滤只会得到"当前页的子集"，让 total 与分页器失真
+// 状态已由后端过滤，这里直接展示当前页结果。
 const visibleOrders = computed(() => page.value?.records ?? [])
 
 function orderKey(id: ApiId): string {
@@ -60,14 +59,11 @@ async function loadOrders(): Promise<void> {
   }
 }
 
-// 注意：el-segmented 同时用了 v-model 和 @change，进到这里时 selectedFilter
-// 已被 v-model 改好，所以不能拿"值没变"做提前返回。组件本身只在值变化时才 emit change，
-// 而模板里"查看全部订单"按钮是直接调用，此时赋值仍然必要。
+// 筛选值可能由组件或按钮触发，统一重置分页并重新请求。
 async function selectFilter(filter: OrderFilter): Promise<void> {
   selectedFilter.value = filter
   actionError.value = ''
-  // 切换筛选必须回到第 1 页并重新请求：
-  // 停在第 3 页换筛选条件，新条件下可能压根没有第 3 页
+  // 切换筛选回到第 1 页重新请求。
   currentPage.value = 1
   await loadOrders()
 }

@@ -9,8 +9,7 @@ public class RedisConstants {
     public static final String LOGIN_CODE_KEY = PROJECT_KEY_PREFIX + "login:code:";
     public static final Duration LOGIN_CODE_TTL = Duration.ofMinutes(2);
 
-    // 验证码限流：同号 60 秒冷却 + 单日上限。
-    // 没有这两道闸时 /user/code 是免登录的，一个手机号能被无限次刷短信。
+    // 验证码发送冷却和每日次数限制。
     public static final String LOGIN_CODE_COOLDOWN_KEY = PROJECT_KEY_PREFIX + "login:code:cd:";
     public static final Duration LOGIN_CODE_COOLDOWN = Duration.ofSeconds(60);
     public static final String LOGIN_CODE_QUOTA_KEY = PROJECT_KEY_PREFIX + "login:code:quota:";
@@ -25,8 +24,7 @@ public class RedisConstants {
     public static final Duration CACHE_EVENT_DETAIL_TTL = Duration.ofMinutes(30);
     public static final String CACHE_EVENT_DETAIL_KEY = PROJECT_KEY_PREFIX + "cache:event:detail:";
 
-    // 调优前的单表 Event 缓存，生产代码已不再使用；
-    // 仅 EventDetailProfilingTest 保留它复现调优前基线，勿删
+    // 旧版缓存键仅供基准测试使用。
     public static final Duration CACHE_EVENT_TTL = Duration.ofMinutes(30);
     public static final String CACHE_EVENT_KEY = PROJECT_KEY_PREFIX + "cache:event:";
     public static final Duration CACHE_EVENT_CATEGORY_TTL = Duration.ofHours(1);
@@ -39,13 +37,12 @@ public class RedisConstants {
     public static final String LOCK_EVENT_GEO_ALL_KEY = PROJECT_KEY_PREFIX + "lock:event:geo:all";
     public static final Duration LOCK_EVENT_TTL = Duration.ofSeconds(10);
 
-    // 票档预约：库存 / 一人一票 / 分布式锁
-    // 库存与一人一票两个键必须落在同一 slot，故用 {ticketId} 作为 hash tag，便于后续切换 Redis Cluster
+    // 票档预约：库存 / 一人一票 / 分布式锁，相关键使用相同 hash tag。
     public static final String LOCK_ORDER_KEY = PROJECT_KEY_PREFIX + "lock:order:";
     public static final String LOCK_SIGN_KEY = PROJECT_KEY_PREFIX + "lock:sign:";
     public static final String ID_ICR_KEY = PROJECT_KEY_PREFIX + "icr:";
 
-    // 落库时等待用户订单锁的时长：锁冲突是“稍后再试”，不该当成落库失败直接进死信
+    // 落库时等待用户订单锁的时间。
     public static final Duration LOCK_ORDER_WAIT = Duration.ofSeconds(5);
     public static final Duration LOCK_SIGN_WAIT = Duration.ofSeconds(3);
 

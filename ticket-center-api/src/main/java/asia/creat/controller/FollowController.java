@@ -21,26 +21,26 @@ public class FollowController {
     private final FollowService followService;
 
     @PutMapping("/{id}/{isFollow}")
-    public Result follow(@PathVariable("id") Long id,
-                         @PathVariable("isFollow") boolean isFollow) {
+    public Result follow(@PathVariable Long id,
+                         @PathVariable boolean isFollow) {
         followService.follow(id, isFollow);
         return Result.success();
     }
 
     @GetMapping("/or/not/{id}")
-    public Result isFollow(@PathVariable("id") Long id) {
+    public Result isFollow(@PathVariable Long id) {
         boolean follow = followService.isFollow(id);
         return Result.success(follow);
     }
 
     @GetMapping("/followees/{id}")
-    public Result followees(@PathVariable("id") Long id, @Validated PageQuery query) {
+    public Result followees(@PathVariable Long id, @Validated PageQuery query) {
         PageResult<UserVO> users = followService.queryFollowees(id, query);
         return Result.success(users);
     }
 
     @GetMapping("/fans/{id}")
-    public Result fans(@PathVariable("id") Long id, @Validated PageQuery query) {
+    public Result fans(@PathVariable Long id, @Validated PageQuery query) {
         PageResult<UserVO> users = followService.queryFans(id, query);
         return Result.success(users);
     }

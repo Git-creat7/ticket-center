@@ -86,18 +86,11 @@ public class UserController {
     public Result info(@PathVariable("id") Long userId) {
         UserInfo info = userInfoService.getById(userId);
         if (info == null) {
-            // 只返回默认值，不落库：这是 GET，写库会被任意 userId 拿来批量建行
-            //（PersonPage 用 URL 上的 id 直接调这个接口，遍历一遍就能刷满 tb_user_info）。
-            // 缺行不需要在读路径自愈：注册时 createUserWithPhone 已建行，
-            // sign 与 updateProfile 各自也有兜底新建分支。
             info = new UserInfo().setUserId(userId).setCredits(0);
         } else {
             info.setCreateTime(null);
             info.setUpdateTime(null);
         }
-        // 关注数/粉丝数用 tb_follow 实时统计覆盖掉库里那两列。
-        // 那两列只在建行时写过 0，关注与取关都没有维护它们，
-        // 而 ProfilePage 与 PersonPage 都把它们当实时计数展示。
         info.setFollowee(followService.countFollowee(userId));
         info.setFans(followService.countFans(userId));
         return Result.success(info);

@@ -105,7 +105,7 @@ public class TicketOrderProducer {
         }
     }
 
-    /** 发送延时关单消息；消息丢失时由定时扫库兜底。 */
+    // 发送延时关单消息，丢失时由定时任务兜底。
     public void sendDelayCancelMessage(TicketOrderCancelMessage cancelMessage) {
         CorrelationData correlationData = new CorrelationData("cancel:" + cancelMessage.getOrderId());
         log.info("【RabbitMQ】发送订单超时取消延时消息, orderId={}, TTL={}ms",

@@ -28,9 +28,6 @@ public interface EventService extends IService<Event> {
     List<EventListItemVO> queryHotEvents(PageQuery query);
 
     /** 标记"想看"（HyperLogLog UV），返回当前想看人数 */
-    /**
-     * @param visitorIp 未登录访客的去重标识，由控制层从请求中取得
-     */
     long addUv(Long eventId, String visitorIp);
 
     /** 查询某演出的想看人数（UV） */

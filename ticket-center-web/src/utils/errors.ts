@@ -11,8 +11,7 @@ export function getErrorMessage(error: unknown, fallback = '请求失败，请�
     if (status === 403) return '没有权限执行该操作'
     if (status === 404) return '请求的内容不存在或已被删除'
     if (status >= 500) return '服务暂时不可用，请稍后重试'
-    // 兜底成中文：再往下走会命中 error.message，
-    // 那是 axios 的英文文案（"Request failed with status code 400"），不该给用户看
+    // 避免把 Axios 的英文错误文案直接展示给用户。
     return fallback
   }
   if (error instanceof Error && error.message) return error.message

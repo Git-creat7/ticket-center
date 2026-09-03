@@ -11,13 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-/**
- * 校验 {@link RequireAdmin} 标记的接口是否由管理员调用。
- *
- * 角色每次都从 MySQL 读，不放进登录 Token：
- * 放 Token 里意味着提权/降权要等用户重新登录才生效，而降权不生效是安全问题。
- * 管理端接口是低频写操作（建活动、加票档），多一次主键查询无所谓。
- */
 @Slf4j
 @RequiredArgsConstructor
 public class AdminInterceptor implements HandlerInterceptor {
@@ -32,8 +25,7 @@ public class AdminInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 走到这里 LoginInterceptor(order=1) 已经放行，UserHolder 必然有值；
-        // 仍判一次 null，避免以后有人把这个拦截器的 order 调到登录之前。
+        // 角色从数据库读取，提权或降权立即生效。
         UserDTO current = UserHolder.getUser();
         if (current == null || current.getId() == null) {
             InterceptorErrorWriter.write(response, objectMapper, 401, "未登录或登录已过期");

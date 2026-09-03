@@ -24,9 +24,9 @@ public interface TicketOrderService extends IService<TicketOrder> {
     /** 我的订单列表 */
     PageResult<TicketOrderVO> myOrders(PageQuery query, Integer status);
 
-    /** 超时关单（延时队列消费者调用：状态机转为已取消并释放 MySQL 与 Redis 库存及退还积分） */
+    /** 超时关单（延时队列消费者调用） */
     void cancelTimeoutOrder(Long orderId);
 
-    /** 定时扫描超时未支付订单并释放库存（作为延时队列的二次兜底保障） */
+    /** 定时扫描超时未支付订单并释放库存 */
     void releaseTimeoutOrders();
 }

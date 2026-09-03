@@ -15,3 +15,8 @@ spring:
           min-idle: 8
           max-wait: 2s
           time-between-eviction-runs: 10s
+
+# 容器部署走这个 profile，压掉 application.yaml 里给本地开发用的 debug 与 MyBatis SQL 输出。
+logging:
+  level:
+    asia.creat: info

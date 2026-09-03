@@ -29,11 +29,7 @@ public class UserInfo implements Serializable {
 
     private String introduce;
 
-    /**
-     * 库里这两列不维护，只在建行时写 0。
-     * 对外的值由 UserController#info 从 tb_follow 实时统计后覆盖，
-     * 不要直接信任从数据库读出来的数字。
-     */
+    // 关注数由 tb_follow 实时统计。
     @TableField(exist = false)
     private Integer fans;
 

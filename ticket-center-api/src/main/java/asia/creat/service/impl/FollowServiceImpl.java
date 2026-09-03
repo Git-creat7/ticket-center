@@ -53,8 +53,7 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
                 backfillFeed(userId, targetUserId);
                 return;
             }
-            // tb_follow 没有指向 tb_user 的外键，伪造的 targetUserId 插进来照样成功，
-            // 所以这里先校验目标用户。放在幂等判断之后，重复关注不多查一次库。
+            // 关注前确认目标用户存在。
             if (userService.getById(targetUserId) == null) {
                 throw new BusinessException(404, "目标用户不存在");
             }
@@ -139,14 +138,9 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         }
     }
 
-    // 关注数与粉丝数直接从 tb_follow 数，不用 tb_user_info 里那两列。
-    // 那两列只在建行时写 0，从来没有维护过，页面上永远显示 0 关注 0 粉丝。
-    // 选择实时统计而不是补上写时自增：这两个数是活的聚合，不是下单价那种历史事实，
-    // 存起来就要处理关注/取关两条路径的漂移，而 follow() 目前没有事务包住 DB 与 Redis。
-    // 两个方向都有覆盖索引（uk_follow_user_target 与 idx_follow_target），
-    // 且只在个人主页这一处冷路径调用。
     @Override
     public int countFollowee(Long userId) {
+        // 关注和粉丝数直接统计关系表。
         Long count = followMapper.selectCount(new LambdaQueryWrapper<Follow>()
                 .eq(Follow::getUserId, userId));
         return count == null ? 0 : count.intValue();

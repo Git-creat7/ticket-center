@@ -31,9 +31,7 @@ public class User implements Serializable {
 
     private String icon = "";
 
-    /**
-     * 0 普通用户，1 管理员。注册时不允许指定，只能由 DBA 手工提权。
-     */
+    // 0 普通用户，1 管理员。
     private Integer role = 0;
 
     private LocalDateTime createTime;

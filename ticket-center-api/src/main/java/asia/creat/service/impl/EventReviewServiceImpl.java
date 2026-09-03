@@ -61,7 +61,7 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
     public List<EventReviewVO> queryHotReview(PageQuery query) {
         Page<EventReview> page = query()
                 .orderByDesc("liked")
-                // liked 大量为 0，缺第二排序键时翻页顺序完全不确定，比热门演出更容易漏行/重行
+                // liked 大量为 0，缺第二排序键时翻页顺序完全不确定
                 .orderByDesc("id")
                 .page(query.toPage());
 
@@ -93,18 +93,17 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
         Long userId = UserHolder.getUser().getId();
         String key = REVIEW_LIKED_KEY + id;
 
-        // 不能先 ZSCORE 判断再改计数：并发下两个请求都读到未点赞，liked 会被加两次。
-        // 改为直接用 ZREM / ZADD 的返回值判定——它们本身是原子的，只有真正改变了集合的那次请求才动 DB 计数。
+        // 用 ZREM/ZADD 的结果判断状态，避免并发重复计数。
         Long removed = stringRedisTemplate.opsForZSet().remove(key, userId.toString());
         if (removed != null && removed > 0) {
             // 本次调用把用户从点赞集合里移除了，说明是取消点赞
-            update().setSql("liked = liked - 1").eq("id", id).update();
+            update().setSql("liked = GREATEST(COALESCE(liked, 0) - 1, 0)").eq("id", id).update();
             return;
         }
 
         Boolean added = stringRedisTemplate.opsForZSet().add(key, userId.toString(), System.currentTimeMillis());
         if (Boolean.TRUE.equals(added)) {
-            // 只有新增成功（此前不在集合中）才加计数，重复点赞不会累加
+            // 只有新增成功才增加计数
             update().setSql("liked = liked + 1").eq("id", id).update();
         }
     }
@@ -112,8 +111,7 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
     @Override
     public List<UserVO> queryReviewLikes(Long id) {
         String key = REVIEW_LIKED_KEY + id;
-        // score 是点赞时间戳，用 reverseRange 取最近点赞的 5 个；
-        // range 是升序，会返回最早点赞的 5 个，"谁赞过"应展示最新的
+        // score 是点赞时间戳，按倒序取最近的 5 个用户
         Set<String> latest5 = stringRedisTemplate.opsForZSet().reverseRange(key, 0, 4);
         if (latest5 == null || latest5.isEmpty()) {
             return Collections.emptyList();
@@ -137,15 +135,11 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
             throw new BusinessException("新增评价失败！");
         }
 
-        // 累加演出评价数。用 setSql 让 MySQL 自己加，不能先读出来再加：
-        // 并发评价下两个请求都读到同一个旧值，其中一次的累加会被覆盖。
-        // 与插入同一个事务，避免评价已落库而计数没加。
+        // 评价和演出评价数在同一事务中更新。
         int updated = eventMapper.update(null, new LambdaUpdateWrapper<Event>()
                 .setSql("comments = comments + 1")
                 .eq(Event::getId, review.getEventId()));
         if (updated != 1) {
-            // 评价表没有指向 tb_event 的外键，event_id 不存在时插入照样成功。
-            // 这里不抛：抛了会改变现有的"脏 event_id 也接受"行为，只留痕供排查
             log.warn("评价已保存但演出评价数未累加，event_id 可能不存在, reviewId={}, eventId={}",
                     review.getId(), review.getEventId());
         }
@@ -199,15 +193,7 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
         });
     }
 
-    /**
-     * 提交之后再把评价 id 推给粉丝（Feed 流）。
-     *
-     * 必须放在事务外：本方法加上 @Transactional 之后，扇出就跑在 commit 之前了，
-     * 事务这时还可能回滚 —— 评价没落库，Feed 里却留下指向不存在评价的 id。
-     *
-     * MySQL 是唯一事实来源。这步失败只留告警：queryReviewOfFollow 取到查不出的 id
-     * 会自己过滤掉，Feed 少一条不影响状态。
-     */
+    // 事务提交后再写 Feed，避免回滚留下无效动态。
     private void pushToFollowerFeedAfterCommit(Long authorId, Long reviewId) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -235,7 +221,6 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
         int offset = queryDTO.getOffset();
         int size = queryDTO.getSize();
 
-        // ZREVRANGEBYSCORE key min max LIMIT offset count
         Set<ZSetOperations.TypedTuple<String>> tuples = stringRedisTemplate.opsForZSet()
                 .reverseRangeByScoreWithScores(key, 0, max, offset, size);
 
@@ -275,23 +260,15 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
     }
 
     private EventReviewVO toReviewVO(EventReview review) {
-        // 单条也走批量实现，避免同一套字段映射写两遍：批量大小为 1 时开销与原来一致
+        // 单条也复用批量组装逻辑
         return toReviewVOList(List.of(review)).get(0);
     }
 
-    /**
-     * 批量组装评价 VO。
-     *
-     * 原先是逐条 {@code toReviewVO}，每条各查一次作者（SQL）、各查一次点赞状态（Redis）：
-     * 一页 10 条就是 1 次分页查询 + 10 次 SELECT + 10 次 ZSCORE = 21 次往返。
-     * 现在固定 3 次：分页查询、一次 selectBatchIds、一次 pipeline。
-     */
     private List<EventReviewVO> toReviewVOList(List<EventReview> reviews) {
         if (reviews.isEmpty()) {
             return List.of();
         }
 
-        // 批量取作者，避免逐条各查一次（N+1）
         Set<Long> userIds = reviews.stream()
                 .map(EventReview::getUserId)
                 .filter(Objects::nonNull)
@@ -317,13 +294,6 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
         return voList;
     }
 
-    /**
-     * 批量查当前用户对这批评价的点赞状态，返回值与入参一一对位。
-     *
-     * 每条评价的点赞集合是各自独立的 key，ZMSCORE 只能查同一个 key 的多个 member，用不上；
-     * 改用 pipeline 把 N 次 ZSCORE 压成一次往返。pipeline 的返回顺序与命令入队顺序一致，
-     * 下标对位就靠这条保证。
-     */
     private List<Boolean> queryLikedFlags(List<EventReview> reviews) {
         UserDTO currentUser = UserHolder.getUser();
         if (currentUser == null) {
@@ -336,7 +306,7 @@ public class EventReviewServiceImpl extends ServiceImpl<EventReviewMapper, Event
             for (EventReview review : reviews) {
                 stringConn.zScore(REVIEW_LIKED_KEY + review.getId(), member);
             }
-            // 回调必须返回 null：pipeline 的结果由 executePipelined 统一收集
+            // 回调结果由 executePipelined 统一收集
             return null;
         });
 

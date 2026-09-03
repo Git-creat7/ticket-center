@@ -36,13 +36,13 @@ public class EventReviewController {
     }
 
     @DeleteMapping("/{id}")
-    public Result deleteReview(@PathVariable("id") Long id) {
+    public Result deleteReview(@PathVariable Long id) {
         reviewService.deleteReview(id);
         return Result.success();
     }
 
     @PutMapping("/like/{id}")
-    public Result likeReview(@PathVariable("id") Long id) {
+    public Result likeReview(@PathVariable Long id) {
         reviewService.likeReview(id);
         return Result.success();
     }
@@ -54,19 +54,19 @@ public class EventReviewController {
     }
 
     @GetMapping("/of/user/{id}")
-    public Result queryReviewsByUser(@PathVariable("id") Long id, @Validated PageQuery query) {
+    public Result queryReviewsByUser(@PathVariable Long id, @Validated PageQuery query) {
         PageResult<EventReviewVO> reviews = reviewService.queryReviewsByUser(id, query);
         return Result.success(reviews);
     }
 
     @GetMapping("/{id}")
-    public Result queryReviewById(@PathVariable("id") Long id) {
+    public Result queryReviewById(@PathVariable Long id) {
         EventReviewVO vo = reviewService.queryReviewById(id);
         return Result.success(vo);
     }
 
     @GetMapping("/likes/{id}")
-    public Result queryReviewLikes(@PathVariable("id") Long id) {
+    public Result queryReviewLikes(@PathVariable Long id) {
         List<UserVO> users = reviewService.queryReviewLikes(id);
         return Result.success(users);
     }

@@ -31,7 +31,7 @@ public class EventController {
     private final EventService eventService;
 
     @GetMapping("/{id}")
-    public Result queryEventById(@PathVariable("id") Long id) {
+    public Result queryEventById(@PathVariable Long id) {
         EventDetailVO vo = eventService.queryById(id);
         return Result.success(vo);
     }

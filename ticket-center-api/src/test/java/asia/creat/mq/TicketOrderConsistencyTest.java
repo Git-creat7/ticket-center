@@ -259,8 +259,7 @@ public class TicketOrderConsistencyTest extends IntegrationTestcontainers {
         stringRedisTemplate.opsForValue().set(stockKey, "50");
         stringRedisTemplate.opsForSet().add(orderKey, testUserId.toString());
 
-        // 放一个哨兵值占住详情缓存：EventDetailVO 里带着票档 stock，
-        // 库存变动后若不失效，这份旧数据会一直服务到 TTL 到期
+        // 用缓存哨兵值验证库存变动后详情缓存会失效。
         stringRedisTemplate.opsForValue().set(detailCacheKey, "{\"sentinel\":true}");
 
         TicketStock initialStock = ticketStockMapper.selectById(testTicketId);
@@ -314,8 +313,7 @@ public class TicketOrderConsistencyTest extends IntegrationTestcontainers {
         TicketStock initialStock = ticketStockMapper.selectById(testTicketId);
         int baseStock = initialStock.getStock();
 
-        // 已取消的订单：幂等键若用“人 + 票有没有活跃订单”，status=2 不在 (0,1) 里，
-        // 这条重投的消息会被当成新单继续处理，白扣一次库存后才在主键冲突上失败
+        // 已取消订单重投时也必须按订单号幂等，不能再次扣库存。
         ticketOrderMapper.deleteById(testOrderId);
         TicketOrder cancelled = new TicketOrder();
         cancelled.setId(testOrderId);
@@ -376,9 +374,7 @@ public class TicketOrderConsistencyTest extends IntegrationTestcontainers {
         ticketOrderMapper.insert(active);
 
         try {
-            // 另一个订单号的消息到达：说明 Redis 的一人一票 Set 与 MySQL 不一致
-            // （Redis 掉过数据、预热未重建资格 Set 等）。必须抛出，让重试耗尽后进死信，
-            // 由死信消费者回滚这次预约，否则 Redis 里的预扣永久泄漏
+            // Redis 资格与 MySQL 不一致时抛出异常，交给死信流程回滚预扣。
             TicketOrderMessage message = new TicketOrderMessage();
             message.setId(newOrderId);
             message.setUserId(testUserId);

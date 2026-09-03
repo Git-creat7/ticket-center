@@ -26,13 +26,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 评价列表的批量组装与演出评价数累加。
- *
- * 修复前 toReviewVO 是逐条调的：每条评价各查一次作者（SQL）、各查一次点赞状态（Redis），
- * 一页 10 条 = 21 次往返。saveReview 也从不累加 tb_event.comments，
- * 详情页的"评价数"永远停在种子数据的值上。
- */
+// 评价列表批量组装与评价数累加。
 @SpringBootTest
 public class EventReviewBatchTest extends IntegrationTestcontainers {
 
@@ -60,10 +54,7 @@ public class EventReviewBatchTest extends IntegrationTestcontainers {
 
     @BeforeEach
     void setUp() {
-        // 作者必须真的落库：VO 上的 userName 是批量查 tb_user 得来的，
-        // 只塞 UserHolder（ThreadLocal）查不到人，userName 会是 null。
-        // id 交给 MySQL 自增，不写死——写死的 id 可能撞上库里真实用户。
-        // phone 有唯一索引且只有 11 位，用时间戳后 8 位拼出来，避开上次跑崩没清干净的残留。
+        // 创建真实用户，验证批量查询能填充作者信息并避免测试数据冲突。
         User author = new User()
                 .setPhone("139" + String.format("%08d", System.currentTimeMillis() % 100_000_000L))
                 .setNickName(AUTHOR_NICK);
@@ -109,9 +100,7 @@ public class EventReviewBatchTest extends IntegrationTestcontainers {
         dto.setContent("review-batch-test");
         Long id = eventReviewService.saveReview(dto);
         createdReviewIds.add(id);
-        // 把 liked 顶高，让本测试的评价稳定落在热门评价第一页：
-        // queryHotReview 是全局排序（liked DESC, id DESC），否则库里评价一多就取不到。
-        // liked 是点赞总数，与 isLike（当前用户是否点过）是两回事，不影响对位断言
+        // 提高 liked 让测试评价稳定进入热门第一页，且不影响 isLike 对位断言。
         eventReviewService.update().setSql("liked = " + LIKED_BOOST).eq("id", id).update();
         return id;
     }
@@ -131,8 +120,7 @@ public class EventReviewBatchTest extends IntegrationTestcontainers {
     @Test
     @DisplayName("2. 批量组装后作者信息与点赞状态仍逐条正确对位")
     void testBatchAssemblyKeepsPerRowAlignment() {
-        // 三条评价，只给中间那条点赞：pipeline 的返回顺序若与入队顺序不一致，
-        // isLike 就会串到别的行上——这是批量化最容易引入的错
+        // 只给中间评价点赞，验证 pipeline 结果与评价顺序对齐。
         Long first = createReview("A");
         Long second = createReview("B");
         Long third = createReview("C");
@@ -212,10 +200,7 @@ public class EventReviewBatchTest extends IntegrationTestcontainers {
                 secondPage.getRecords().stream().map(EventReviewVO::getId).toList());
     }
 
-    /**
-     * 走 queryHotReview 取本测试造的评价——这是真正的批量路径。
-     * 用 queryReviewById 逐条取会走单条路径，批量对位就测不到了。
-     */
+    // 通过热门评价接口覆盖批量路径。
     private List<EventReviewVO> queryOwnReviews() {
         PageQuery query = new PageQuery();
         query.setSize(100);

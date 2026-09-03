@@ -149,7 +149,7 @@ public class SignServiceImpl implements SignService {
                 return streak;
             }
 
-            // 本月签到连续到 1 号时，继续检查上月。
+            // 跨月时继续读取上月位图。
             cursor = cursor.withDayOfMonth(1).minusDays(1);
         }
     }

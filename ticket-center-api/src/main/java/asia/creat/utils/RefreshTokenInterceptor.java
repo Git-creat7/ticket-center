@@ -34,14 +34,16 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
         }
 
         UserDTO userDTO = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);
+        // 续期放在写 ThreadLocal 之前：expire 抛异常时 preHandle 未返回 true，
+        // afterCompletion 不会回调，此时若已写入就会泄漏到复用该线程的下一个请求。
+        stringRedisTemplate.expire(key, LOGIN_USER_TTL);
         UserHolder.saveUser(userDTO);
-        stringRedisTemplate.expire(key,LOGIN_USER_TTL);
         return true;
     }
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, @Nullable Exception ex) throws Exception {
-        //移除用户
+        // 移除用户
         UserHolder.removeUser();
     }
 }

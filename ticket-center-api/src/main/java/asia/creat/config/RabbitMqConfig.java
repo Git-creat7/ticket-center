@@ -119,9 +119,7 @@ public class RabbitMqConfig {
         return new DirectExchange(CANCEL_EXCHANGE, true, false);
     }
 
-    /**
-     * 延时缓冲队列：无消费者监听，消息到达存活 ORDER_TTL 后通过 DLX 自动投递到 CANCEL_QUEUE
-     */
+    // 延时队列中的消息到期后转发到关单队列。
     @Bean
     public Queue delayQueue() {
         return QueueBuilder.durable(DELAY_QUEUE)
@@ -131,9 +129,7 @@ public class RabbitMqConfig {
                 .build();
     }
 
-    /**
-     * 超时关单处理队列：由关单消费者监听，处理未支付订单取消与库存回补
-     */
+    // 关单消费者监听此队列并释放未支付订单的资源。
     @Bean
     public Queue cancelQueue() {
         return QueueBuilder.durable(CANCEL_QUEUE).build();

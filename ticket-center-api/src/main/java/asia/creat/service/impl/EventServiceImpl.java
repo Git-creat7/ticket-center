@@ -126,8 +126,6 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
     @Override
     public List<EventListItemVO> queryHotEvents(PageQuery query) {
-        // 必须带第二排序键：hot 相同的行在 MySQL 里顺序不保证，
-        // 翻页时同一行可能出现在两页或被跳过
         Page<Event> page = query()
                 .eq("status", 1)
                 .orderByDesc("hot")
@@ -139,8 +137,6 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
     @Override
     public long addUv(Long eventId, String visitorIp) {
-        // 登录用户使用 id，匿名用户使用来源 IP，避免随机标识造成重复计数。
-        // 代理地址由 Spring 的可信代理配置处理，不直接读取可伪造的请求头。
         String visitor;
         if (UserHolder.getUser() != null) {
             visitor = String.valueOf(UserHolder.getUser().getId());

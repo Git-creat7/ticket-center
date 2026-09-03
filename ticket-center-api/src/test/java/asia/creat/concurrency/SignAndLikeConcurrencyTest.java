@@ -122,12 +122,7 @@ public class SignAndLikeConcurrencyTest extends IntegrationTestcontainers {
     void testConcurrentLike_shouldCountOnce() throws Exception {
         Long userId = 88812L;
 
-        // 自建专用评价，测完删除。不复用库里已有数据的两个原因：
-        // 1. 干净库（ticket.sql 不含评价种子数据）里根本没有可借的行，用例会直接挂；
-        // 2. 借用真实评价会改动业务数据的 liked。
-        // 基线取 10 而非 0：点赞与取消并发交错时，DB 的 -1 可能先于配对的 +1 执行，
-        // liked 为 0 时 `liked = liked - 1` 会因无符号越界报错（实测 MySQL 8.4
-        // 抛 ERROR 1690，与 STRICT 模式无关），留出余量避免测试自己触发该缺陷。
+        // 自建评价并设置正数基线，避免测试污染业务数据或触发无符号下溢。
         EventReview review = new EventReview()
                 .setEventId(1L)
                 .setUserId(userId)
@@ -146,14 +141,12 @@ public class SignAndLikeConcurrencyTest extends IntegrationTestcontainers {
 
             int liked = eventReviewService.getById(reviewId).getLiked();
 
-            // 偶数次点赞会互相抵消，故 liked 相对基线只可能是 +1 或 +0，
-            // 关键是绝不能出现 +2 及以上的重复计数
+            // 并发点赞最终只允许增加 0 或 1，不能重复计数。
             int delta = liked - BASE_LIKED;
             Assertions.assertTrue(delta == 0 || delta == 1,
                     CONCURRENCY + " 个并发点赞请求后 liked 相对基线变化应为 0 或 1，实际为 " + delta);
 
-            // Redis 与 DB 必须一致：修复把 Redis 写入提到了 DB 之前，
-            // 若两者脱节就会出现「集合里有人但计数没加」这类脏数据
+            // Redis 点赞集合与数据库计数必须保持一致。
             boolean inZSet = stringRedisTemplate.opsForZSet().score(likedKey, userId.toString()) != null;
             Assertions.assertEquals(inZSet ? 1 : 0, delta,
                     "点赞集合中" + (inZSet ? "已有" : "没有") + "该用户，liked 变化却是 " + delta);
@@ -163,11 +156,7 @@ public class SignAndLikeConcurrencyTest extends IntegrationTestcontainers {
         }
     }
 
-    /**
-     * 让 CONCURRENCY 个线程以同一用户身份同时执行 action。
-     * 返回抛异常的线程数——不记录的话，「所有线程都没跑成功」和
-     * 「修复生效、只有一次写入」会产生同样的最终状态，用例会假绿。
-     */
+    // 以同一用户身份并发执行操作。
     private int runConcurrently(Long userId, Runnable action) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(CONCURRENCY);
         CountDownLatch startGate = new CountDownLatch(1);

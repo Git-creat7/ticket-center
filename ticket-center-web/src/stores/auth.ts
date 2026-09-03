@@ -31,12 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value
   }
 
-  /**
-   * 取回用户信息，失败则清掉刚存下的 token。
-   *
-   * 否则会卡在中间态：token 有了（isAuthenticated 为 true）但 user 是空的，
-   * 界面既不是登录态也不是登出态，登录页还同时弹着"登录失败"。
-   */
+  // 登录后获取用户失败时清掉 token。
   async function loadUserAfterLogin(): Promise<User> {
     try {
       const currentUser = await fetchCurrentUser()

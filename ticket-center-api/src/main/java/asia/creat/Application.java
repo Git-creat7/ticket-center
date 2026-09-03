@@ -14,11 +14,7 @@ import java.util.TimeZone;
 @SpringBootApplication
 public class Application {
 
-    /**
-     * 固定 JVM 默认时区。
-     * Redis 缓存中的 LocalDateTime 由 Hutool 序列化为毫秒时间戳，转换依赖 JVM 默认时区；
-     * 若不同实例时区不一致（如容器默认 UTC 与本机 Asia/Shanghai），读到同一份缓存会产生 8 小时偏差。
-     */
+    // 统一容器和本地时区，避免缓存时间偏差。
     @PostConstruct
     void initTimeZone() {
         TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));

@@ -36,7 +36,7 @@ public class CreditLogServiceImpl extends ServiceImpl<CreditLogMapper, CreditLog
         Page<CreditLog> page = query()
                 .eq("user_id", userId)
                 .orderByDesc("create_time")
-                // create_time 只精确到秒，签到与购票抵扣同秒发生很常见，必须带第二排序键
+                // 时间相同时用 id 保证分页稳定。
                 .orderByDesc("id")
                 .page(query.toPage());
         return PageResult.of(page.getRecords(), page.getTotal(), page.getCurrent(), page.getSize());

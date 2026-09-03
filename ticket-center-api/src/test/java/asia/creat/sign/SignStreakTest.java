@@ -19,12 +19,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
-/**
- * 验证连续签到天数跨月回溯。
- * 签到位图按月分 key（USER_SIGN_KEY:userId:yyyyMM），第 N 天存在第 N-1 位。
- * 修复前只读当月位图，导致每月 1 号连续天数被重置：
- * 上月连签一整月、本月又连签到今天，显示的却只是本月的天数。
- */
+// 验证连续签到天数跨月回溯。
 @SpringBootTest
 public class SignStreakTest extends IntegrationTestcontainers {
 
@@ -163,8 +158,7 @@ public class SignStreakTest extends IntegrationTestcontainers {
     @Test
     @DisplayName("9. 位图短于要查的那一天：越界的位应算未签到，不能读出脏数据")
     void testDayBeyondBitmapLengthIsUnsigned() {
-        // Redis 只把字符串扩到最高置 1 位所在的字节：只签 1 号时位图就 1 个字节，
-        // 覆盖 1~8 号。今天在第 9 天以后，查今天就会越过位图末尾。
+        // 只签到 1 号时位图覆盖 1~8 号，用于验证越过位图末尾的日期按未签到处理。
         org.junit.jupiter.api.Assumptions.assumeTrue(today.getDayOfMonth() >= 9,
                 "今天在本月前 8 天内，位图本就覆盖了今天，越界分支测不到");
         LocalDate firstDay = today.withDayOfMonth(1);
@@ -196,10 +190,7 @@ public class SignStreakTest extends IntegrationTestcontainers {
                 "周一落在上个月，仍应从上月位图里读出已签到；为 false 说明只读了当月 key");
     }
 
-    /**
-     * 签到到昨天为止（今天留空），返回应有的连续天数。
-     * 处理今天是 1 号的情况：此时昨天落在上个月。
-     */
+    // 今天未签到时，从昨天开始统计。
     private int signThroughYesterday() {
         LocalDate yesterday = today.minusDays(1);
         if (today.getDayOfMonth() > 1) {
@@ -211,16 +202,12 @@ public class SignStreakTest extends IntegrationTestcontainers {
         return 1;
     }
 
-    /**
-     * 把某一天置为已签到（自动落到它所属月份的位图）。
-     */
+    // 标记指定日期。
     private void signDay(LocalDate date) {
         signRange(date, date.getDayOfMonth(), date.getDayOfMonth());
     }
 
-    /**
-     * 把 date 所在月份的第 fromDay 到 toDay 天置为已签到。
-     */
+    // 标记日期范围。
     private void signRange(LocalDate date, int fromDay, int toDay) {
         String key = keyOf(date);
         for (int day = fromDay; day <= toDay; day++) {

@@ -66,12 +66,9 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
     private final TicketReservationScript ticketReservationScript;
     private final StringRedisTemplate stringRedisTemplate;
 
-    /** 兜底扫描单轮处理上限 */
+    // 兜底扫描单轮处理上限。
     private static final int TIMEOUT_SCAN_BATCH_SIZE = 500;
 
-    /**
-     * 预约入口：校验票档 -> Redis 原子预扣 -> 发送订单消息。
-     */
     @Override
     public Long reserveTicket(Long ticketId, Boolean useCredits) {
         Long userId = UserHolder.getUser().getId();
@@ -99,7 +96,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
 
         long orderId = redisIdWorker.nextId("order");
 
-        // Lua 原子完成：检查库存、检查一人一票、扣减库存
+        // Redis 原子预扣库存和一人一票资格。
         Long result = ticketReservationScript.reserve(ticketId, userId);
         if (result == null) {
             throw new BusinessException("系统繁忙，请稍后重试");
@@ -114,13 +111,12 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         if (code != 0) {
             throw new BusinessException("系统繁忙，请稍后重试");
         }
-        // Lua 已经完成库存预扣，RabbitMQ 负责异步落库
         TicketOrderMessage message = new TicketOrderMessage();
         message.setId(orderId);
         message.setUserId(userId);
         message.setTicketId(ticketId);
         message.setUseCredits(useCredits);
-        // 冻结成交价。用上面已经查出来的 ticket，不再多查一次
+        // 保存预约时的成交价快照。
         message.setPrice(ticket.getPrice());
         try {
             ticketOrderProducer.send(message);
@@ -140,13 +136,11 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
     public void createTicketOrder(TicketOrderMessage message) {
         Long userId = message.getUserId();
 
-        // 消息按订单号幂等，活跃订单检查只负责一人一票规则。
         if (getById(message.getId()) != null) {
             log.info("【重复投递】订单已存在，跳过落库, orderId={}", message.getId());
             return;
         }
 
-        // 数据库再次校验一人一票，异常交给死信补偿回滚 Redis 预扣。
         Long activeCount = query()
                 .eq("user_id", userId)
                 .eq("ticket_id", message.getTicketId())
@@ -156,7 +150,6 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
             throw new BusinessException("该用户已持有此票档的活跃订单");
         }
 
-        // 数据库再次用 stock > 0 防止超卖
         int update = ticketStockMapper.update(
                 null,
                 new LambdaUpdateWrapper<TicketStock>()
@@ -168,19 +161,16 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
             throw new BusinessException("数据库库存不足，稍后重试");
         }
 
-        // 仍需查票档，但只为拿 event_id；成交价不从这里取
         Ticket ticket = ticketMapper.selectById(message.getTicketId());
         if (ticket == null) {
             throw new BusinessException("票档不存在");
         }
 
-        // 使用预约时的价格快照；旧格式消息没有快照时回退到当前票价。
         long originalPrice = message.getPrice() != null ? message.getPrice() : ticket.getPrice();
         int deductedCredits = deductCredits(message, originalPrice);
         long finalPrice = originalPrice - deductedCredits;
         TicketOrder ticketOrder = buildOrder(message, ticket.getEventId(), finalPrice, deductedCredits);
 
-        // 保存失败会抛异常，事务回滚库存，消息不会 ACK
         if (!save(ticketOrder)) {
             throw new BusinessException("保存订单失败");
         }
@@ -239,7 +229,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
     @Override
     public void pay(Long orderId) {
         Long userId = UserHolder.getUser().getId();
-        // 模拟支付：仅"待支付"可支付
+        // 只有待支付订单可以支付。
         boolean updated = update()
                 .setSql("status = 1, pay_time = NOW()")
                 .eq("id", orderId)
@@ -272,13 +262,11 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
     @Override
     public PageResult<TicketOrderVO> myOrders(PageQuery query, Integer status) {
         Long userId = UserHolder.getUser().getId();
-        // status 下推到 SQL：否则前端只能过滤当前页，
-        // 「全部」有 8 条而「已出票」只剩 2 条，且 total 与分页器全部失真
+        // 状态条件下推到 SQL，保证分页总数正确。
         Page<TicketOrder> page = query()
                 .eq("user_id", userId)
                 .eq(status != null, "status", status)
                 .orderByDesc("create_time")
-                // create_time 只精确到秒，同秒下单的两张票缺第二排序键就会在翻页时错乱
                 .orderByDesc("id")
                 .page(query.toPage());
 
@@ -287,7 +275,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
             return PageResult.of(List.of(), page.getTotal(), page.getCurrent(), page.getSize());
         }
 
-        // 批量取票档与演出，避免逐条订单各查一次（N+1）
+        // 批量加载关联数据，减少逐条查询。
         Set<Long> ticketIds = orders.stream().map(TicketOrder::getTicketId).filter(Objects::nonNull).collect(Collectors.toSet());
         Set<Long> eventIds = orders.stream().map(TicketOrder::getEventId).filter(Objects::nonNull).collect(Collectors.toSet());
 
@@ -334,7 +322,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
             log.warn("【延时关单】订单不存在, orderId={}", orderId);
             return;
         }
-        // 幂等判断：只有“待支付 (0)”状态才需要关单
+        // 只有待支付订单需要关单。
         if (order.getStatus() != null && order.getStatus() != 0) {
             log.info("【延时关单】订单状态已变更，无需处理, orderId={}, currentStatus={}", orderId, order.getStatus());
             return;
@@ -351,15 +339,14 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
     @Override
     @Scheduled(fixedDelay = 60000)
     public void releaseTimeoutOrders() {
-        // 多实例部署时只需一个实例扫描；拿不到锁直接跳过本轮
+        // 多实例只允许一个任务扫描超时订单。
         RLock lock = redissonClient.getLock(RedisConstants.LOCK_ORDER_KEY + "release-timeout");
         if (!lock.tryLock()) {
             return;
         }
         try {
-            // 定时任务作为延时队列的二次兜底保障（扫描待支付且超过超时时间的遗留订单）
+            // 定时扫描作为延时队列的兜底。
             LocalDateTime deadline = LocalDateTime.now().minus(RedisConstants.ORDER_TIMEOUT);
-            // 单轮限量，避免延时队列积压后一次性把全部超时订单载入内存
             List<TicketOrder> timeoutOrders = query()
                     .eq("status", 0)
                     .lt("create_time", deadline)
@@ -371,7 +358,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
             }
             for (TicketOrder order : timeoutOrders) {
                 try {
-                    // 每个订单单独开启事务，一条失败不会影响其他超时订单。
+                    // 单个订单失败不影响本轮其他订单。
                     Boolean cancelled = cancelAndRelease(order);
 
                     if (Boolean.TRUE.equals(cancelled)) {
@@ -390,9 +377,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         }
     }
 
-    /**
-     * 状态机：仅"待支付"可转为"已取消"，返回是否成功（防止并发重复释放）
-     */
+    // 只允许待支付订单转为已取消。
     private boolean doCancel(TicketOrder order) {
         return update().setSql("status = 2")
                 .eq("id", order.getId())
@@ -411,9 +396,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         return Boolean.TRUE.equals(cancelled);
     }
 
-    /**
-     * 释放库存，并清理一人一票记录
-     */
+    // 回补 MySQL 和 Redis 库存并清理购票资格。
     private void releaseStock(TicketOrder order) {
         int updated = ticketStockMapper.update(
                 null, new LambdaUpdateWrapper<TicketStock>()
@@ -427,7 +410,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
 
         releaseRedisReservationAfterCommit(order);
 
-        // 退还下单时实际抵扣的积分（以订单快照为准，避免票档改价后退错）
+        // 按订单快照退还实际抵扣积分。
         int usedCredits = order.getUsedCredits() == null ? 0 : order.getUsedCredits();
         if (usedCredits > 0) {
             userInfoService.update(new LambdaUpdateWrapper<UserInfo>()
@@ -444,7 +427,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         evictEventDetailCacheAfterCommit(order.getEventId());
     }
 
-    /** 提交后释放 Redis 预约；失败只告警，MySQL 仍是事实来源。 */
+    // 事务提交后释放 Redis 预约。
     private void releaseRedisReservationAfterCommit(TicketOrder order) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -464,7 +447,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         });
     }
 
-    /** 提交后清理包含库存的演出详情缓存，避免旧值在事务提交前回填。 */
+    // 事务提交后清理演出详情缓存。
     private void evictEventDetailCacheAfterCommit(Long eventId) {
         if (eventId == null) {
             return;

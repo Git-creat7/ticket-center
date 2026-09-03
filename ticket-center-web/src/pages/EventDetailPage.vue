@@ -139,8 +139,7 @@ async function loadDetail() {
   if (auth.isAuthenticated && auth.user) {
     try {
       const userInfo = await userApi.getInfo(auth.user.id)
-      // 这次 await 之后必须重新校验：快速切演出时旧请求会在这里复活，
-      // 把积分写成上一个演出的值，并把新请求的 loading 提前关掉
+      // 防止快速切换演出时旧请求覆盖新状态。
       if (requestId !== loadRequestId) return
       userCredits.value = userInfo?.credits ?? 0
     } catch {

@@ -21,10 +21,6 @@ const nextMax = ref(Date.now())
 const nextOffset = ref(0)
 const likingId = ref<string | number | null>(null)
 
-/**
- * 滚动加载关注作者的现场评价 Feed 流
- * @param reset 是否重置分页游标并重新加载首屏
- */
 async function loadFollowedReviews(reset = false) {
   if (reset) {
     reviews.value = []
@@ -55,9 +51,6 @@ async function loadFollowedReviews(reset = false) {
   }
 }
 
-/**
- * 动态点赞与取消点赞
- */
 async function toggleLike(review: EventReview) {
   if (likingId.value != null) return
   likingId.value = review.id

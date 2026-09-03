@@ -57,14 +57,6 @@ public class GlobalExceptionHandler {
         return Result.error(400, e.getMessage());
     }
 
-    /**
-     * 静态资源不存在。
-     *
-     * 必须单独处理：否则被下面的 Exception 兜底接走，一张丢失的图片会变成
-     * "服务器内部异常" 500 + 一条 ERROR 级堆栈。前端的 img onerror 靠真实
-     * HTTP 状态码触发，所以这里用 @ResponseStatus 返回真正的 404，
-     * 而不是业务错误那套「HTTP 200 + body.code」——图片请求不经过 axios 拦截器。
-     */
     @ExceptionHandler(NoResourceFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public Result handleNoResourceFound(NoResourceFoundException e) {
