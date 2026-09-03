@@ -30,6 +30,7 @@ public class TicketReserveConcurrencyTest extends IntegrationTestcontainers {
     private static final int RESERVE_SUCCESS = 0;
     private static final int RESERVE_SOLD_OUT = 1;
     private static final int RESERVE_DUPLICATE = 2;
+    private static final int RESERVE_NOT_WARMED = 3;
 
     @Autowired
     private TicketReservationScript ticketReservationScript;
@@ -98,6 +99,30 @@ public class TicketReserveConcurrencyTest extends IntegrationTestcontainers {
 
             Assertions.assertEquals(String.valueOf(concurrency - 1), stringRedisTemplate.opsForValue().get(stockKey),
                     "只有一笔成功，库存也只应扣 1");
+        } finally {
+            stringRedisTemplate.delete(List.of(stockKey, orderKey));
+        }
+    }
+
+    @Test
+    @DisplayName("3. 库存键缺失：返回 3 而非 1，不放行也不与售罄混淆")
+    void testReserve_missingStockKey_shouldReportNotWarmed() {
+        long ticketId = 99912L;
+        long userId = 90600L;
+
+        String stockKey = RedisConstants.ticketStockKey(ticketId);
+        String orderKey = RedisConstants.ticketOrderKey(ticketId);
+        stringRedisTemplate.delete(List.of(stockKey, orderKey));
+
+        try {
+            Long code = ticketReservationScript.reserve(ticketId, userId);
+
+            Assertions.assertEquals(RESERVE_NOT_WARMED, code.intValue(),
+                    "库存键不存在应返回 3（未预热），返回 1 会把运维故障伪装成正常售罄");
+            Assertions.assertFalse(stringRedisTemplate.hasKey(stockKey),
+                    "未预热时不应凭空建出库存键，否则 incrby 会从 0 扣成负数");
+            Assertions.assertEquals(0L, stringRedisTemplate.opsForSet().size(orderKey).longValue(),
+                    "预约未成立，不应占用一人一票资格");
         } finally {
             stringRedisTemplate.delete(List.of(stockKey, orderKey));
         }

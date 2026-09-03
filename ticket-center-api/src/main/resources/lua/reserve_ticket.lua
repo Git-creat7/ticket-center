@@ -2,6 +2,7 @@
 -- @return  0 预约成功
 -- @return  1 库存不足
 -- @return  2 重复预约
+-- @return  3 库存键不存在（缓存未预热或被误删）
 
 -- key 列表
 -- @param KEYS[1] 库存键 tc:ticket:{id}:stock
@@ -14,9 +15,13 @@ local stockKey = KEYS[1]
 local orderKey = KEYS[2]
 local userId = ARGV[1]
 
--- 判断库存是否充足
+-- 键不存在与库存为 0 是两回事：前者是缓存未预热，此时放行会超卖，
+-- 但对外报"库存不足"会掩盖故障，交给调用方按系统异常处理。
 local stock = redis.call('get', stockKey)
-if not stock or tonumber(stock) <= 0 then
+if not stock then
+    return 3
+end
+if tonumber(stock) <= 0 then
     return 1
 end
 

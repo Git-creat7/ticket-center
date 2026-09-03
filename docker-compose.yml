@@ -25,7 +25,9 @@ services:
       - "127.0.0.1:6379:6379"
     environment:
       REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?TICKET_REDIS_PASSWORD must be set}"
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${TICKET_REDIS_PASSWORD}"]
+    # masterauth 不能省：故障转移后本节点会被降级为从节点，缺这项就永远认证不上新主，
+    # 表现为 master_link_status:down —— 既不同步数据，写入又被 READONLY 拒绝。
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${TICKET_REDIS_PASSWORD}", "--masterauth", "${TICKET_REDIS_PASSWORD}"]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -220,6 +222,22 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./ticket-center-web
+    container_name: ticket-frontend
+    environment:
+      # 容器内后端是服务名，不是 localhost（那会指向前端容器自己）。
+      VITE_API_TARGET: "http://backend:8080"
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      # backend 没有定义 healthcheck，只能等它启动而非就绪。
+      backend:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
   mysql-data:

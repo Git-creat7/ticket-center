@@ -71,7 +71,7 @@
 ### 5. 压测套件的硬编码凭据与绝对路径（交付问题）
 
 - **问题**：`run_all_benchmarks.ps1` 里明文写着 Redis 与 MySQL 密码（3 处调用），JMeter 计划、Python 脚本、压测报告中散布着 `F:/CodeProject/ticket-center/...` 绝对路径，换台机器整套压测跑不起来、报告链接全是死链。
-- **修复**：凭据统一从仓库根 `.env` 读取，缺失则报错退出；路径改为 `$PSScriptRoot` / `Path(__file__).parent` 自定位，JMeter CSV 改用裸文件名由 FileServer 按 jmx 目录解析；`.env.example` 补 `DB_USERNAME`、`JMETER_BIN`。
+- **修复**：凭据统一从仓库根 `.env` 读取，缺失则报错退出；路径改为 `$PSScriptRoot` / `Path(__file__).parent` 自定位，JMeter CSV 改用裸文件名由 FileServer 按 jmx 目录解析；`.env.example` 补 `DB_USERNAME`、`JMETER_EXEC`。
 - **记忆点**：**密码从未进过 git 历史（该文件当时还在未追踪状态），但明文在磁盘上存在过就该轮换**。另外压测产物（`reports/` 含约 1.7 万个第三方静态资源、`jmeter_tokens.csv` 含 100 条 token）此前既未追踪也未忽略，一次 `git add -A` 就会全部入库——**"没被提交"和"不会被提交"是两回事**，生成物必须显式写进 `.gitignore`。
 
 ### 6. 详情页伪缓存穿透放大与 UV 读写解耦（调优实战）

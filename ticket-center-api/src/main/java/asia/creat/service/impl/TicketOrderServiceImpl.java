@@ -69,6 +69,9 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
     // 兜底扫描单轮处理上限。
     private static final int TIMEOUT_SCAN_BATCH_SIZE = 500;
 
+    // 单笔订单的积分抵扣上限，单位与票价一致（分）。
+    private static final long MAX_CREDIT_DEDUCTION = 1000L;
+
     @Override
     public Long reserveTicket(Long ticketId, Boolean useCredits) {
         Long userId = UserHolder.getUser().getId();
@@ -108,7 +111,14 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         if (code == 2) {
             throw new BusinessException("每个用户限购一张");
         }
+        if (code == 3) {
+            // 库存键缺失说明预热没跑或键被误删，不是正常售罄，需要人工介入
+            log.error("【库存键缺失】Redis 未预热或键被删除，ticketId={}, key={}",
+                    ticketId, RedisConstants.ticketStockKey(ticketId));
+            throw new BusinessException("系统繁忙，请稍后重试");
+        }
         if (code != 0) {
+            log.error("【预约脚本返回未知码】ticketId={}, userId={}, code={}", ticketId, userId, code);
             throw new BusinessException("系统繁忙，请稍后重试");
         }
         TicketOrderMessage message = new TicketOrderMessage();
@@ -186,7 +196,7 @@ public class TicketOrderServiceImpl extends ServiceImpl<TicketOrderMapper, Ticke
         Long userId = message.getUserId();
         UserInfo userInfo = userInfoService.getById(userId);
         int availableCredits = userInfo != null && userInfo.getCredits() != null ? userInfo.getCredits() : 0;
-        int usedCredits = (int) Math.min((long) availableCredits, Math.min(1000L, originalPrice));
+        int usedCredits = (int) Math.min((long) availableCredits, Math.min(MAX_CREDIT_DEDUCTION, originalPrice));
         if (usedCredits <= 0) {
             return 0;
         }

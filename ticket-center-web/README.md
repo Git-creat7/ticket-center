@@ -6,7 +6,7 @@ Ticket Center 用户端，基于 Vue 3、Vite 和 TypeScript。
 
 先启动 `ticket-center-api`，再从项目根目录执行：
 
-```powershell
+```bash
 cd ticket-center-web
 npm install
 npm run dev
@@ -17,12 +17,12 @@ npm run dev
 
 ## 构建
 
-```powershell
+```bash
 npm run build
 ```
 
 活动海报已经提交到 `public/imgs/events/`。需要重新生成时运行：
 
-```powershell
+```bash
 npm run assets:generate
 ```
