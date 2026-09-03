@@ -5,8 +5,10 @@
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $benchmarkDir = $PSScriptRoot
-$resultsDir = "$benchmarkDir\results"
-$reportsDir = "$benchmarkDir\reports"
+# 路径统一用正斜杠：Windows 的 .NET 同样接受，而 Linux 上反斜杠只是普通字符，
+# "$dir\results" 会拼成一个名字里带反斜杠的文件而不是子目录。
+$resultsDir = "$benchmarkDir/results"
+$reportsDir = "$benchmarkDir/reports"
 
 # 从仓库根目录的 .env 读取凭据，避免把密码写进脚本
 $envFile = Join-Path (Split-Path $benchmarkDir -Parent) '.env'
@@ -20,7 +22,10 @@ if (Test-Path $envFile) {
 
 Remove-Item env:JMETER_BIN -ErrorAction SilentlyContinue
 
-$jmeterExec = if ($env:JMETER_EXEC) { $env:JMETER_EXEC } else { "jmeter.bat" }
+# Linux/macOS 的启动器叫 jmeter（shell 脚本），没有 .bat。
+# 判平台用 $env:OS 而不是 $IsWindows：后者在 Windows PowerShell 5.1 里是 $null。
+$defaultJmeter = if ($env:OS -eq 'Windows_NT') { "jmeter.bat" } else { "jmeter" }
+$jmeterExec = if ($env:JMETER_EXEC) { $env:JMETER_EXEC } else { $defaultJmeter }
 if ($env:JMETER_EXEC) {
     $jmeterParent = Split-Path $env:JMETER_EXEC -Parent
     if ($jmeterParent -and (Test-Path $jmeterParent)) {
@@ -44,24 +49,24 @@ Write-Host "=========================================================="
 Write-Host '[步骤 0] 重置并预热秒杀库存 (ticket_id=3, 库存=50)...'
 docker exec ticket-redis redis-cli -a $redisPassword set "tc:ticket:{3}:stock" 50 2>$null | Out-Null
 docker exec ticket-redis redis-cli -a $redisPassword del "tc:ticket:{3}:order" 2>$null | Out-Null
-mysql "-u$dbUser" "-p$dbPassword" ticket_center -e "UPDATE tb_ticket_stock SET stock=50 WHERE ticket_id=3; DELETE FROM tb_ticket_order WHERE ticket_id=3;" 2>$null | Out-Null
+docker exec ticket-mysql mysql "-u$dbUser" "-p$dbPassword" ticket_center -e "UPDATE tb_ticket_stock SET stock=50 WHERE ticket_id=3; DELETE FROM tb_ticket_order WHERE ticket_id=3;" 2>$null | Out-Null
 Write-Host 'MySQL 与 Redis 库存已重置为 50'
 
 # 清理上一轮的结果文件
-Remove-Item -Path "$resultsDir\*" -Force -Recurse -ErrorAction SilentlyContinue
-Remove-Item -Path "$reportsDir\*" -Force -Recurse -ErrorAction SilentlyContinue
+Remove-Item -Path "$resultsDir/*" -Force -Recurse -ErrorAction SilentlyContinue
+Remove-Item -Path "$reportsDir/*" -Force -Recurse -ErrorAction SilentlyContinue
 
 # 1. 签到状态压测
 Write-Host "`n[场景 1] 压测 GET /user/sign/status (200 线程 x 50 循环 = 10,000 样本)..."
-& $jmeterExec -n -t "$benchmarkDir\1_sign_status_qps.jmx" -l "$resultsDir\sign_status.jtl" -e -o "$reportsDir\sign_status_report"
+& $jmeterExec -n -t "$benchmarkDir/1_sign_status_qps.jmx" -l "$resultsDir/sign_status.jtl" -e -o "$reportsDir/sign_status_report"
 
 # 2. 演出详情压测
 Write-Host "`n[场景 2] 压测 GET /event/1 (200 线程 x 20 循环 = 4,000 样本)..."
-& $jmeterExec -n -t "$benchmarkDir\2_event_detail_qps.jmx" -l "$resultsDir\event_detail.jtl" -e -o "$reportsDir\event_detail_report"
+& $jmeterExec -n -t "$benchmarkDir/2_event_detail_qps.jmx" -l "$resultsDir/event_detail.jtl" -e -o "$reportsDir/event_detail_report"
 
 # 3. 秒杀抢票压测
 Write-Host "`n[场景 3] 压测 POST /ticket-orders/reserve/3 (100 线程 x 10 循环 = 1,000 样本)..."
-& $jmeterExec -n -t "$benchmarkDir\3_seckill_reserve_qps.jmx" -l "$resultsDir\seckill_reserve.jtl" -e -o "$reportsDir\seckill_reserve_report"
+& $jmeterExec -n -t "$benchmarkDir/3_seckill_reserve_qps.jmx" -l "$resultsDir/seckill_reserve.jtl" -e -o "$reportsDir/seckill_reserve_report"
 
 # 等待 2 秒，让 RabbitMQ 异步消费者把订单落库
 Start-Sleep -Seconds 2
@@ -123,16 +128,16 @@ function Parse-Jtl($jtlFile, $label) {
     Write-Host "  错误率:     $errRate %"
 }
 
-Parse-Jtl "$resultsDir\sign_status.jtl" "场景 1：签到状态查询 GET /user/sign/status"
+Parse-Jtl "$resultsDir/sign_status.jtl" "场景 1：签到状态查询 GET /user/sign/status"
 Write-Host ""
-Parse-Jtl "$resultsDir\event_detail.jtl" "场景 2：演出详情聚合读 GET /event/1"
+Parse-Jtl "$resultsDir/event_detail.jtl" "场景 2：演出详情聚合读 GET /event/1"
 Write-Host ""
-Parse-Jtl "$resultsDir\seckill_reserve.jtl" "场景 3：秒杀抢票并发写 POST /ticket-orders/reserve/3"
+Parse-Jtl "$resultsDir/seckill_reserve.jtl" "场景 3：秒杀抢票并发写 POST /ticket-orders/reserve/3"
 
 # 秒杀数据强一致性核对
 $redisStock = (docker exec ticket-redis redis-cli -a $redisPassword get "tc:ticket:{3}:stock" 2>$null).Trim()
 $redisOrders = (docker exec ticket-redis redis-cli -a $redisPassword scard "tc:ticket:{3}:order" 2>$null).Trim()
-$dbOrders = (mysql "-u$dbUser" "-p$dbPassword" ticket_center -se "SELECT COUNT(*) FROM tb_ticket_order WHERE ticket_id=3;" 2>$null).Trim()
+$dbOrders = (docker exec ticket-mysql mysql "-u$dbUser" "-p$dbPassword" ticket_center -se "SELECT COUNT(*) FROM tb_ticket_order WHERE ticket_id=3;" 2>$null).Trim()
 
 Write-Host "`n----------------------------------------------------------"
 Write-Host ">>> 秒杀强一致性核对（初始 50 张票，打入 1000 笔请求）："
@@ -146,7 +151,7 @@ if ($redisStock -eq "0" -and $redisOrders -eq "50" -and $dbOrders -eq "50") {
 }
 Write-Host "----------------------------------------------------------"
 Write-Host "HTML 报告已生成："
-Write-Host "  1. $reportsDir\sign_status_report\index.html"
-Write-Host "  2. $reportsDir\event_detail_report\index.html"
-Write-Host "  3. $reportsDir\seckill_reserve_report\index.html"
+Write-Host "  1. $reportsDir/sign_status_report/index.html"
+Write-Host "  2. $reportsDir/event_detail_report/index.html"
+Write-Host "  3. $reportsDir/seckill_reserve_report/index.html"
 Write-Host "=========================================================="
