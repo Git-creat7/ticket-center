@@ -110,5 +110,3 @@ benchmark/jmeter_tokens.csv
 benchmark/*.jtl
 benchmark/*.log
 benchmark/rtt_probe_*.txt
-
-docs/TASK-perf-tuning.md

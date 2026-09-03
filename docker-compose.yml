@@ -82,7 +82,10 @@ services:
           'sentinel down-after-milliseconds mymaster 5000' \
           'sentinel failover-timeout mymaster 60000' \
           'sentinel parallel-syncs mymaster 1' > /data/sentinel.conf.tmp
-        if [ ! -s /data/sentinel.conf ]; then mv /data/sentinel.conf.tmp /data/sentinel.conf; else rm -f /data/sentinel.conf.tmp; fi
+        # 每次启动都用声明的配置覆盖，不保留上一次故障转移写回的结论：
+        # redis 容器不带 --replicaof，重建后总以主节点身份启动，若这边还记着
+        # 旧主，两者就会各执一词，集群里出现两个自称 master 的节点。
+        mv /data/sentinel.conf.tmp /data/sentinel.conf
         exec redis-server /data/sentinel.conf --sentinel
     depends_on:
       redis:
@@ -119,7 +122,10 @@ services:
           'sentinel down-after-milliseconds mymaster 5000' \
           'sentinel failover-timeout mymaster 60000' \
           'sentinel parallel-syncs mymaster 1' > /data/sentinel.conf.tmp
-        if [ ! -s /data/sentinel.conf ]; then mv /data/sentinel.conf.tmp /data/sentinel.conf; else rm -f /data/sentinel.conf.tmp; fi
+        # 每次启动都用声明的配置覆盖，不保留上一次故障转移写回的结论：
+        # redis 容器不带 --replicaof，重建后总以主节点身份启动，若这边还记着
+        # 旧主，两者就会各执一词，集群里出现两个自称 master 的节点。
+        mv /data/sentinel.conf.tmp /data/sentinel.conf
         exec redis-server /data/sentinel.conf --sentinel
     depends_on:
       redis:
@@ -156,7 +162,10 @@ services:
           'sentinel down-after-milliseconds mymaster 5000' \
           'sentinel failover-timeout mymaster 60000' \
           'sentinel parallel-syncs mymaster 1' > /data/sentinel.conf.tmp
-        if [ ! -s /data/sentinel.conf ]; then mv /data/sentinel.conf.tmp /data/sentinel.conf; else rm -f /data/sentinel.conf.tmp; fi
+        # 每次启动都用声明的配置覆盖，不保留上一次故障转移写回的结论：
+        # redis 容器不带 --replicaof，重建后总以主节点身份启动，若这边还记着
+        # 旧主，两者就会各执一词，集群里出现两个自称 master 的节点。
+        mv /data/sentinel.conf.tmp /data/sentinel.conf
         exec redis-server /data/sentinel.conf --sentinel
     depends_on:
       redis:
