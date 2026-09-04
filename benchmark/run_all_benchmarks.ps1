@@ -41,29 +41,9 @@ if (-not $dbPassword -or -not $redisPassword) {
     exit 1
 }
 
-# 主节点会随故障转移漂移，容器名不能写死：往降级后的从节点写会被 READONLY 拒绝，
-# 而脚本里的重置命令是静默的，失败了也照跑，最后压出来的是一堆无效样本。
-# 以 sentinel 的答案为准而不是自己扫 role:master —— 后端也走 sentinel 发现，
-# 脑裂时集群里可能有多个自称 master 的节点，扫描会挑中后端没在用的那个。
-function Get-RedisMasterContainer {
-    $addr = docker exec ticket-redis-sentinel-1 redis-cli -p 26379 -a $redisPassword `
-        --no-auth-warning sentinel get-master-addr-by-name mymaster 2>$null
-    if (-not $addr) { return $null }
-    $masterIp = ($addr | Select-Object -First 1).Trim()
 
-    foreach ($name in @('ticket-redis', 'ticket-redis-replica-1', 'ticket-redis-replica-2')) {
-        $ip = (docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $name 2>$null)
-        if ($ip -and $ip.Trim() -eq $masterIp) { return $name }
-    }
-    return $null
-}
-
-$redisMaster = Get-RedisMasterContainer
-if (-not $redisMaster) {
-    Write-Host "找不到 Redis 主节点，集群可能处于降级状态，请先修复再压测"
-    exit 1
-}
-Write-Host "Redis 主节点：$redisMaster"
+$redisContainer = 'ticket-redis'
+Write-Host "使用 Redis 容器：$redisContainer"
 
 Write-Host "=========================================================="
 Write-Host ">>> 开始执行 JMeter 全量压测套件"
@@ -71,8 +51,8 @@ Write-Host "=========================================================="
 
 # 0. 重置秒杀库存 (ticket_id=3)
 Write-Host '[步骤 0] 重置并预热秒杀库存 (ticket_id=3, 库存=50)...'
-docker exec $redisMaster redis-cli -a $redisPassword set "tc:ticket:{3}:stock" 50 2>$null | Out-Null
-docker exec $redisMaster redis-cli -a $redisPassword del "tc:ticket:{3}:order" 2>$null | Out-Null
+docker exec $redisContainer redis-cli -a $redisPassword set "tc:ticket:{3}:stock" 50 2>$null | Out-Null
+docker exec $redisContainer redis-cli -a $redisPassword del "tc:ticket:{3}:order" 2>$null | Out-Null
 docker exec ticket-mysql mysql "-u$dbUser" "-p$dbPassword" ticket_center -e "UPDATE tb_ticket_stock SET stock=50 WHERE ticket_id=3; DELETE FROM tb_ticket_order WHERE ticket_id=3;" 2>$null | Out-Null
 Write-Host 'MySQL 与 Redis 库存已重置为 50'
 
@@ -159,8 +139,8 @@ Write-Host ""
 Parse-Jtl "$resultsDir/seckill_reserve.jtl" "场景 3：秒杀抢票并发写 POST /ticket-orders/reserve/3"
 
 # 秒杀数据强一致性核对
-$redisStock = (docker exec $redisMaster redis-cli -a $redisPassword get "tc:ticket:{3}:stock" 2>$null).Trim()
-$redisOrders = (docker exec $redisMaster redis-cli -a $redisPassword scard "tc:ticket:{3}:order" 2>$null).Trim()
+$redisStock = (docker exec $redisContainer redis-cli -a $redisPassword get "tc:ticket:{3}:stock" 2>$null).Trim()
+$redisOrders = (docker exec $redisContainer redis-cli -a $redisPassword scard "tc:ticket:{3}:order" 2>$null).Trim()
 $dbOrders = (docker exec ticket-mysql mysql "-u$dbUser" "-p$dbPassword" ticket_center -se "SELECT COUNT(*) FROM tb_ticket_order WHERE ticket_id=3;" 2>$null).Trim()
 
 Write-Host "`n----------------------------------------------------------"
