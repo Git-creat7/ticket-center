@@ -12,7 +12,18 @@ set -euo pipefail
 LABEL="${1:?用法: rtt_probe.sh <label> [并发] [请求数]}"
 CONC="${2:-100}"
 TOTAL="${3:-2000}"
-URL="http://localhost:8080/user/sign/status"
+ENV_FILE="$(dirname "$0")/../.env"
+BACKEND_PORT="${BACKEND_HOST_PORT:-}"
+if [ -z "$BACKEND_PORT" ] && [ -f "$ENV_FILE" ]; then
+    BACKEND_PORT="$(awk -F= '
+        $1 ~ /^[[:space:]]*BACKEND_HOST_PORT[[:space:]]*$/ {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
+            print $2
+            exit
+        }' "$ENV_FILE")"
+fi
+BACKEND_PORT="${BACKEND_PORT:-8080}"
+URL="http://localhost:${BACKEND_PORT}/user/sign/status"
 TOKEN="rttprobe0000000000000000000000ab"
 OUT="$(dirname "$0")/rtt_probe_${LABEL}.txt"
 

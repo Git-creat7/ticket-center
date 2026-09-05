@@ -5,7 +5,6 @@ import os
 import sys
 from pathlib import Path
 
-BASE_URL = "http://localhost:8080"
 BENCHMARK_DIR = Path(__file__).resolve().parent
 CSV_FILE = str(BENCHMARK_DIR / "jmeter_tokens.csv")
 USER_COUNT = 100
@@ -25,40 +24,14 @@ def load_env():
 
 
 load_env()
+BACKEND_PORT = os.environ.get("BACKEND_HOST_PORT") or "8080"
+BASE_URL = f"http://localhost:{BACKEND_PORT}"
 REDIS_PASSWORD = os.environ.get("TICKET_REDIS_PASSWORD")
 if not REDIS_PASSWORD:
     sys.exit("缺少 TICKET_REDIS_PASSWORD，请先在仓库根目录准备 .env（参考 .env.example）")
+REDIS_CONTAINER = "ticket-redis"
 
-def find_redis_master():
-    """主节点会随故障转移漂移，容器名不能写死：从降级后的从节点读不到刚写入的验证码。
-
-    以 sentinel 的答案为准而不是自己扫 role:master —— 后端也走 sentinel 发现，
-    脑裂时集群里可能有多个自称 master 的节点，扫描会挑中后端没在用的那个。
-    """
-    addr = subprocess.run(
-        ["docker", "exec", "ticket-redis-sentinel-1", "redis-cli", "-p", "26379",
-         "-a", REDIS_PASSWORD, "--no-auth-warning",
-         "sentinel", "get-master-addr-by-name", "mymaster"],
-        capture_output=True, text=True).stdout.split()
-    if not addr:
-        return None
-    master_ip = addr[0]
-
-    for name in ("ticket-redis", "ticket-redis-replica-1", "ticket-redis-replica-2"):
-        ip = subprocess.run(
-            ["docker", "inspect", "-f",
-             "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name],
-            capture_output=True, text=True).stdout.strip()
-        if ip == master_ip:
-            return name
-    return None
-
-
-REDIS_MASTER = find_redis_master()
-if not REDIS_MASTER:
-    sys.exit("找不到 Redis 主节点，集群可能处于降级状态，请先修复再生成 Token")
-
-print(f">>> 开始生成 {USER_COUNT} 个压测用 Token（Redis 主节点：{REDIS_MASTER}）...")
+print(f">>> 开始生成 {USER_COUNT} 个压测用 Token（Redis 容器：{REDIS_CONTAINER}）...")
 
 tokens = []
 
@@ -75,7 +48,7 @@ for i in range(1, USER_COUNT + 1):
         continue
     
     # 2. 从 Redis 提取验证码
-    cmd = ["docker", "exec", REDIS_MASTER, "redis-cli", "-a", REDIS_PASSWORD,
+    cmd = ["docker", "exec", REDIS_CONTAINER, "redis-cli", "-a", REDIS_PASSWORD,
            "--no-auth-warning", "get", f"tc:login:code:{phone}"]
     res = subprocess.run(cmd, capture_output=True, text=True)
     code = res.stdout.strip()

@@ -35,6 +35,7 @@ if ($env:JMETER_EXEC) {
 $dbUser = if ($env:DB_USERNAME) { $env:DB_USERNAME } else { "root" }
 $dbPassword = $env:DB_PASSWORD
 $redisPassword = $env:TICKET_REDIS_PASSWORD
+$backendPort = if ($env:BACKEND_HOST_PORT) { $env:BACKEND_HOST_PORT } else { "8080" }
 
 if (-not $dbPassword -or -not $redisPassword) {
     Write-Host ".env 中缺少 DB_PASSWORD 或 TICKET_REDIS_PASSWORD"
@@ -62,15 +63,15 @@ Remove-Item -Path "$reportsDir/*" -Force -Recurse -ErrorAction SilentlyContinue
 
 # 1. 签到状态压测
 Write-Host "`n[场景 1] 压测 GET /user/sign/status (200 线程 x 50 循环 = 10,000 样本)..."
-& $jmeterExec -n -t "$benchmarkDir/1_sign_status_qps.jmx" -l "$resultsDir/sign_status.jtl" -e -o "$reportsDir/sign_status_report"
+& $jmeterExec -n "-Jbackend_port=$backendPort" -t "$benchmarkDir/1_sign_status_qps.jmx" -l "$resultsDir/sign_status.jtl" -e -o "$reportsDir/sign_status_report"
 
 # 2. 演出详情压测
 Write-Host "`n[场景 2] 压测 GET /event/1 (200 线程 x 20 循环 = 4,000 样本)..."
-& $jmeterExec -n -t "$benchmarkDir/2_event_detail_qps.jmx" -l "$resultsDir/event_detail.jtl" -e -o "$reportsDir/event_detail_report"
+& $jmeterExec -n "-Jbackend_port=$backendPort" -t "$benchmarkDir/2_event_detail_qps.jmx" -l "$resultsDir/event_detail.jtl" -e -o "$reportsDir/event_detail_report"
 
 # 3. 秒杀抢票压测
 Write-Host "`n[场景 3] 压测 POST /ticket-orders/reserve/3 (100 线程 x 10 循环 = 1,000 样本)..."
-& $jmeterExec -n -t "$benchmarkDir/3_seckill_reserve_qps.jmx" -l "$resultsDir/seckill_reserve.jtl" -e -o "$reportsDir/seckill_reserve_report"
+& $jmeterExec -n "-Jbackend_port=$backendPort" -t "$benchmarkDir/3_seckill_reserve_qps.jmx" -l "$resultsDir/seckill_reserve.jtl" -e -o "$reportsDir/seckill_reserve_report"
 
 # 等待 2 秒，让 RabbitMQ 异步消费者把订单落库
 Start-Sleep -Seconds 2
