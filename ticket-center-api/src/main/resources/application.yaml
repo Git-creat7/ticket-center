@@ -26,9 +26,6 @@ spring:
       timeout: 3s
       lettuce:
         pool:
-          # max-active 原为 10：Tomcat 默认 200 个工作线程，每条连接后面排着约 20 个请求。
-          # 签到接口实测每次 Redis 往返边际成本 11.9 ms，而 Redis 自报 usec_per_call 只有
-          # 2~15 微秒——差三个数量级，那 11.9 ms 基本全是池等待。放到 50 让排队深度降到 4。
           max-active: 50
           max-idle: 50
           # min-idle 原为 1：空闲回收后突发流量要现建 49 条连接，握手全压在请求路径上
@@ -84,10 +81,6 @@ ticket:
     cli-profile: ${TICKET_OSS_CLI_PROFILE:}
 
 management:
-  # 独立管理端口，且 compose 不发布它，因此从宿主机无法访问。
-  # MVC 拦截器挡不住 actuator：WebMvcConfigurer 注册的拦截器只绑在
-  # RequestMappingHandlerMapping 上，actuator 走的是 WebMvcEndpointHandlerMapping，
-  # 靠路径白名单根本拦不住，只能靠不暴露端口或引入 Spring Security。
   server:
     port: 8081
   endpoints:
