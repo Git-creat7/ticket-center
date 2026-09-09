@@ -1,8 +1,15 @@
 # Ticket Center
-
+![Java](https://img.shields.io/badge/Java-17-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
+![Spring Cloud](https://img.shields.io/badge/Spring_Cloud-2023-blue?style=for-the-badge&logo=spring&logoColor=white)
+![Vue.js](https://img.shields.io/badge/Vue.js-3.x-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8.x-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7.x-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.x-FF6600?style=for-the-badge&logo=rabbitmq&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Container-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI/CD-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 > 活动票务预约平台。个人全栈项目，后端围绕高并发抢票、缓存设计与消息驱动的最终一致性展开。
->
-> 项目标签：Java 17 · Spring Boot · Redis + Lua · RabbitMQ · Spring Cloud · 高并发抢票 · Testcontainers · GitHub Actions
 >
 > **个人独立完成**：后端整体架构设计、核心抢票链路、并发控制、缓存优化、数据库设计、自动化测试、压测验证，以及 CI/CD 流水线与镜像交付方案设计。
 > **Agent 协助完成**：前端页面开发、部分部署脚本与配置模板；本人负责接口定义、业务逻辑对齐、全链路联调与正确性校验。
