@@ -222,8 +222,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
         // 初始化用户详情
         UserInfo info = new UserInfo()
-                .setUserId(user.getId())
-                .setCredits(0);
+                .setUserId(user.getId());
         userInfoService.save(info);
         return user;
     }
@@ -294,8 +293,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                     .setCity(updateDTO.getCity())
                     .setIntroduce(updateDTO.getIntroduce())
                     .setGender(updateDTO.getGender())
-                    .setBirthday(updateDTO.getBirthday())
-                    .setCredits(0);
+                    .setBirthday(updateDTO.getBirthday());
             userInfoService.save(info);
         } else {
             LambdaUpdateWrapper<UserInfo> infoWrapper =

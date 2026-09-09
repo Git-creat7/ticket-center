@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="asia.creat.mapper.TicketWaitlistMapper">
+
+    <select id="selectHead" resultType="asia.creat.entity.TicketWaitlist">
+        SELECT * FROM tb_ticket_waitlist
+        WHERE ticket_id = #{ticketId} AND status IN (0, 1)
+        ORDER BY id LIMIT 1
+    </select>
+
+    <select id="selectUserActive" resultType="asia.creat.entity.TicketWaitlist">
+        SELECT * FROM tb_ticket_waitlist
+        WHERE user_id = #{userId} AND ticket_id = #{ticketId} AND active_flag = 1
+    </select>
+
+    <select id="selectPendingTicketIds" resultType="java.lang.Long">
+        SELECT DISTINCT ticket_id FROM tb_ticket_waitlist WHERE status IN (0, 1) ORDER BY ticket_id
+    </select>
+
+    <sql id="viewColumns">
+        w.id, w.ticket_id, t.title AS ticket_title, w.status, w.price, w.use_credits,
+        w.failure_reason, w.reservation_id, w.create_time, o.id AS order_id, o.status AS order_status,
+        DATE_ADD(o.create_time, INTERVAL #{timeoutSeconds} SECOND) AS payment_deadline,
+        CASE WHEN w.status IN (0, 1) THEN
+            (SELECT COUNT(*) + 1 FROM tb_ticket_waitlist ahead
+             WHERE ahead.ticket_id = w.ticket_id AND ahead.status IN (0, 1) AND ahead.id &lt; w.id)
+        ELSE NULL END AS position
+    </sql>
+
+    <sql id="viewTables">
+        tb_ticket_waitlist w
+        LEFT JOIN tb_ticket t ON t.id = w.ticket_id
+        LEFT JOIN tb_ticket_reservation r ON r.id = w.reservation_id
+        LEFT JOIN tb_ticket_order o ON o.id = r.order_id
+    </sql>
+
+    <select id="selectMine" resultType="asia.creat.vo.TicketWaitlistVO">
+        SELECT <include refid="viewColumns"/> FROM <include refid="viewTables"/>
+        WHERE w.user_id = #{userId} ORDER BY w.id DESC
+    </select>
+
+    <select id="selectView" resultType="asia.creat.vo.TicketWaitlistVO">
+        SELECT <include refid="viewColumns"/> FROM <include refid="viewTables"/>
+        WHERE w.id = #{id} AND w.user_id = #{userId}
+    </select>
+</mapper>

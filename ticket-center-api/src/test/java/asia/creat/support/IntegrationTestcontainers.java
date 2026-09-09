@@ -1,24 +1,30 @@
 package asia.creat.support;
 
+import asia.creat.client.OrderClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.lifecycle.Startables;
 
 /** Shared infrastructure for Spring integration tests. */
 @ActiveProfiles("testcontainers")
 public abstract class IntegrationTestcontainers {
 
+    @MockitoBean
+    private TaskScheduler taskScheduler;
+
+    @MockitoBean
+    protected OrderClient orderClient;
+
     private static final String MYSQL_PASSWORD = "testcontainers";
-    private static final String RABBITMQ_USERNAME = "test";
-    private static final String RABBITMQ_PASSWORD = "test";
 
     protected static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4")
             .withDatabaseName("ticket_center")
-            .withUsername("root")
+            .withUsername("ticket_core")
             .withPassword(MYSQL_PASSWORD)
             .withInitScript("db/ticket.sql");
 
@@ -26,12 +32,8 @@ public abstract class IntegrationTestcontainers {
             .withExposedPorts(6379)
             .withCommand("redis-server", "--appendonly", "yes");
 
-    protected static final RabbitMQContainer RABBITMQ = new RabbitMQContainer("rabbitmq:3.13-management")
-            .withUser(RABBITMQ_USERNAME, RABBITMQ_PASSWORD)
-            .withPermission("/", RABBITMQ_USERNAME, ".*", ".*", ".*");
-
     static {
-        Startables.deepStart(MYSQL, REDIS, RABBITMQ).join();
+        Startables.deepStart(MYSQL, REDIS).join();
     }
 
     @DynamicPropertySource
@@ -44,10 +46,6 @@ public abstract class IntegrationTestcontainers {
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> "");
 
-        registry.add("spring.rabbitmq.host", RABBITMQ::getHost);
-        registry.add("spring.rabbitmq.port", RABBITMQ::getAmqpPort);
-        registry.add("spring.rabbitmq.username", () -> RABBITMQ_USERNAME);
-        registry.add("spring.rabbitmq.password", () -> RABBITMQ_PASSWORD);
-        registry.add("spring.rabbitmq.virtual-host", () -> "/");
+
     }
 }

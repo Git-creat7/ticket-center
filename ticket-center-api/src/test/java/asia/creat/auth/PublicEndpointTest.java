@@ -47,14 +47,12 @@ public class PublicEndpointTest extends IntegrationTestcontainers {
         mockMvc.perform(get("/event/1")).andExpect(status().isOk());
         mockMvc.perform(get("/event-category/list")).andExpect(status().isOk());
         mockMvc.perform(get("/event-review/hot").param("current", "1")).andExpect(status().isOk());
-        mockMvc.perform(get("/ticket/of/event/1")).andExpect(status().isOk());
     }
 
     @Test
     @DisplayName("需登录的接口未登录时返回 401")
     void testProtectedEndpoints_RequireLogin() throws Exception {
         mockMvc.perform(get("/user/me")).andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/ticket-orders/me")).andExpect(status().isUnauthorized());
         mockMvc.perform(put("/event-review/like/1")).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/event-review")
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))

@@ -1,183 +1,174 @@
 # Ticket Center
 
-> 活动票务预约平台。个人全栈项目，后端为重点，围绕高并发抢票、缓存设计与消息驱动的最终一致性展开。
+> 活动票务预约平台。个人全栈项目，后端围绕高并发抢票、缓存设计与消息驱动的最终一致性展开。
+>
+> 项目标签：Java 17 · Spring Boot · Redis + Lua · RabbitMQ · Spring Cloud · 高并发抢票 · Testcontainers · GitHub Actions
+>
+> **个人独立完成**：后端整体架构设计、核心抢票链路、并发控制、缓存优化、数据库设计、自动化测试、压测验证，以及 CI/CD 流水线与镜像交付方案设计。
+> **Agent 协助完成**：前端页面开发、部分部署脚本与配置模板；本人负责接口定义、业务逻辑对齐、全链路联调与正确性校验。
 
-## 项目定位
+## 1. 项目简介 + 核心成果
 
-票务抢购的难点不在功能多，而在同一时刻大量用户争抢有限库存：既不能超卖造成资损，也不能因为加锁过重把吞吐压死。本项目用 Redis + Lua 把库存预扣做成原子操作，用 RabbitMQ 把订单落库转为异步，并为投递失败、消费失败、支付超时各配一条补偿路径。
+票务抢购的难点在于大量用户同时争抢有限库存：不能超卖，也不能用过重的锁把吞吐压垮。本项目将库存预扣、异步建单、限时支付和库存回补串成一条可恢复链路，并通过预约与候补处理售罄场景。
 
-- **解决的问题**：库存超卖与少卖、一人一票排重、异步链路的消息丢失与重复投递、订单超时未支付的库存回补
-- **应用场景**：演出票、场馆预约、限量商品秒杀等「库存有限 + 瞬时高并发」的读写混合场景
-- **项目价值**：完成从登录鉴权、缓存优化、原子扣减、异步落库到失败补偿的完整闭环，并以自动化测试与压测数据验证正确性和性能
+- **核心问题**：库存超卖与少卖、一人一票排重、消息重复或丢失、支付超时回补
+- **量化结论**：历史基线中，100 并发提交 1,000 次请求争抢 50 张票，最终落库 50 笔，零超卖、零少卖；签到状态查询达到 2,860 ~ 3,005 req/s
+- **项目成果**：完成微服务拆分、Redis 原子扣减、RabbitMQ 异步落库、失败重试、候补递补和 Testcontainers 集成验证
 
-<p align="center">
-  <!-- 演示图片：把截图放到 docs/images/ 下，替换下面的 src 即可 -->
-  <img src="docs/images/demo.png" alt="Ticket Center 演示" width="100%" />
-</p>
+## 2. 核心架构图
 
-<p align="center"><sub>演示：活动详情与票档预约流程。</sub></p>
+```text
+Vue 前端 :5173
+      │ /api、/uploads
+      ▼
+Gateway :8080 ───── Nacos 注册与配置中心 :8848
+      ├─ ticket-center-api :8082 ── ticket_center
+      │    用户、活动、评价、评论、关注
+      └─ order-service :8083 ───── ticket_order + RabbitMQ
+           票档、库存、预约、候补、订单、签到、积分
 
-## 技术栈
+抢票请求 → 预约落库 → Redis Lua 预扣 → RabbitMQ 建单 → 订单落库
+                                      └→ 支付/取消/超时 → Redis 回补
+```
 
-- **后端**：Java 17 / Spring Boot 3.5.14 / MyBatis-Plus 3.5.9
-- **数据与缓存**：MySQL 8.4 / Redis 7（Lua 脚本、Bitmap、HyperLogLog、GEO）/ Redisson 分布式锁
-- **消息队列**：RabbitMQ 3.13（死信队列、延时关单）
-- **前端**：Vue 3.5 / Vite 8 / TypeScript 6 / Pinia / Axios
-- **测试与交付**：JUnit 5 / Testcontainers / GitHub Actions / Docker Compose / Apache JMeter 5.6.3
+两个业务服务通过 OpenFeign 调用内部接口，共用 Redis 登录态，但不跨库读取对方业务表。`ticket-common` 只放通用响应、会话校验、配置和跨服务 DTO，不共享业务 Entity 或 Mapper。
 
-## 核心设计：抢票链路
+## 3. 核心设计：抢票链路与并发控制
+
+第一次出现的三个概念：
+
+- **预约号**：一次受理请求的唯一身份，用来查询结果，也用来校验后续回补，避免旧请求误释放新库存。
+- **恢复任务**：与预约记录一起提交到 MySQL 的持久化任务；Redis、RabbitMQ 暂时不可用时，定时重试推进链路。
+- **回补**：订单取消、支付超时或建单失败后，按预约号恢复 Redis 库存和一人一票资格。
+
+**一句话结论：Redis Lua 原子预扣负责“不会超卖”，RabbitMQ + 持久化任务负责“最终能落库或回补”，数据库约束负责“重复请求也不会多卖”。**
 
 ```text
 选择票档
-  ├─ Lua 原子脚本：查库存 → 查一人一票 → 扣减库存        （Redis，单次往返）
-  ├─ 发送订单消息                                        （RabbitMQ）
-  ├─ 消费者落库：DB 二次校验库存与排重 → 写订单
-  └─ 用户支付 / 主动取消 / 15 分钟延时关单 → 库存回补
+  ├─ MySQL 创建预约记录和恢复任务，返回预约号（状态：处理中）
+  ├─ 恢复任务调用 Lua：校验库存和一人一票 → 原子扣减
+  ├─ 发布订单消息，消费者二次校验后写入订单
+  └─ 支付成功，或取消/15 分钟超时 → 按预约号回补
 ```
 
-把库存预扣放进 Lua 是这条链路的关键：检查与扣减在 Redis 单线程内原子完成，并发下不存在「都读到有货、都去扣减」的窗口，因此不需要在应用层加锁串行化。落库交给消息队列异步执行，用户请求在预扣成功后即可返回。
+三条一致性防线：
 
-三条防线保证异步链路不丢不重：
+1. **Lua 原子扣减，解决超卖**：库存检查、排重和扣减在 Redis 单线程内一次完成，不在应用层串行加锁。
+2. **消息幂等与持久化恢复，解决丢消息**：消费者按订单号幂等；重试耗尽后记录失败并创建回补任务，预约结果可查询。
+3. **数据库唯一索引与预约行锁，解决并发重复落库**：`uk_user_ticket_active` 限制活跃订单唯一，预约行锁协调消费、取消和超时。
 
-1. **消息重复投递** — 消费者按订单号幂等，已存在则直接跳过
-2. **消费失败** — 重试耗尽后进死信队列，由补偿消费者回滚 Redis 预扣与一人一票资格
-3. **数据库兜底** — `tb_ticket_order` 上有 `uk_user_ticket_active` 唯一索引（借虚拟生成列实现「活跃订单唯一、取消后可重购」），Redisson 锁失效时由它拦住重复落库
+### 候补规则
 
-## 工程要点
+售罄后可以加入候补，每人每票档最多一个有效候补。入队不占库存、不扣积分，释放名额优先按入队顺序递补；递补成功后获得限时支付资格，超时或取消则继续分配给下一位。候补记录、关联预约和恢复任务都保存在 MySQL，递补仍复用 RabbitMQ 异步建单。
 
-**详情页聚合缓存**：原实现每请求 4 次网络往返（Redis GET + PFCOUNT + 2 次 MySQL），收敛为聚合视图缓存单次读取，并把 UV 统计从读路径剥离到写路径。调优当时实测 QPS 565.6 → 3,558.7，平均耗时 266ms → 16.9ms。
+预约状态主线为 `处理中 → 预扣成功 → 建单成功 → 已支付`；预扣失败、取消或超时进入失败/释放分支。候补状态主线为 `排队中 → 已递补 → 待支付`，递补失败会保留顺序等待恢复。
 
-**签到接口的往返次数**：签到状态查询原本按位逐次访问 Redis（今日 `GETBIT`、连签 `BITFIELD`、当月 `BITCOUNT`、本周七天各一次，加拦截器两次，实测每请求 12 次往返）。改为整月位图一次读回、位运算在内存完成，往返降到 3 次，调优当时实测 QPS 1,206 → 3,374。定位手段是 `CONFIG RESETSTAT` + `INFO commandstats` 直接数命令数，而非猜测。
+## 4. 关键技术优化点
 
-**并发计数的原子性**：签到发积分、评价点赞、评论计数都避免「先读后写」——点赞用 `ZREM`/`ZADD` 的返回值判定状态变化，计数交给 MySQL 自增，跨月位图与积分流水用 `FOR UPDATE` 加乐观条件兜底。
+统一按“问题 → 方案 → 收益”说明：
 
-**列表查询的 N+1**：订单列表、评价列表、演出分类名三处改为批量加载，点赞状态用 pipeline 一次取回。
+- **详情页读放大** → 活动基础信息缓存，票档和库存由订单服务实时聚合 → 避免跨库查询和缓存失效误报售罄。
+- **签到状态 Redis 往返多** → 整月 Bitmap 一次读回，位运算放在内存 → 往返从约 12 次降到 3 次，历史基线达到 2,860 ~ 3,005 req/s。
+- **点赞、签到积分先读后写** → 用 Redis 命令返回值判断状态变化，MySQL 自增和行锁兜底 → 并发下计数与积分流水不重复。
+- **列表 N+1 查询** → 批量加载分类、评价和订单关联数据，点赞状态使用 pipeline → 减少数据库和 Redis 请求次数。
+- **深分页与同秒排序不稳定** → 使用 `(status, hot DESC, id DESC)` 复合索引，并统一追加 `id` 排序 → 减少 filesort，翻页结果稳定。
+- **单体边界不清** → 活动/社区与交易分库，跨服务只走 Feign 内部接口 → 服务职责和数据归属可独立演进。
 
-**排序索引与深分页**：热门榜单的排序键写成降序复合索引（`(status, hot DESC, id DESC)`），避免 filesort；分页统一带第二排序键 `id`，防止同秒数据在翻页时错乱。
+## 5. 质量与性能验证
 
-## 质量保障
+集成测试使用 Testcontainers 启动真实的 MySQL、Redis 和 RabbitMQ，不依赖本机预装中间件。GitHub Actions 在 PR 和 `main` push 上运行后端测试与前端测试，`main` 测试通过后再构建镜像。
 
-**自动化测试**：17 个测试类、69 项测试。集成测试通过 Testcontainers 拉起真实的 MySQL 8.4、Redis 7、RabbitMQ 3.13，不依赖本机预装中间件。
+重点覆盖：
 
-```bash
-cd ticket-center-api
-mvn test
-```
-
-重点覆盖并发正确性：
-
-| 测试类 | 验证内容 |
+| 测试范围 | 验证内容 |
 | :--- | :--- |
-| `TicketReserveConcurrencyTest` | 200 线程抢 10 张，成功数恰好 10、库存精确归零；50 线程同一用户只成功 1 笔 |
-| `TicketOrderConsistencyTest` | 死信补偿的回滚与防误回滚、重复投递幂等、超时关单 |
-| `SignAndLikeConcurrencyTest` | 20 线程并发签到只发一份积分；并发点赞计数与 Redis 集合保持一致 |
-| `LoginCodeAtomicConsumptionTest` | 20 线程抢同一验证码，恰好 1 次成功 |
+| 预约与候补流程 | 请求幂等、查询权限、预扣、候补优先、取消竞争、超时递补、故障恢复 |
+| 订单一致性 | RabbitMQ 重复投递、死信回补、超时关单、数据库唯一约束 |
+| 并发正确性 | 200 线程抢 10 张票恰好成功 10 笔；同一用户并发只成功 1 笔 |
+| Redis 原子操作 | 验证码单次消费、签到积分、点赞计数与集合一致 |
+| 微服务边界 | Gateway 路由、内部凭据过滤、Feign 故障返回和服务启动 |
 
-**持续集成**：`.github/workflows/ci.yml` 在 push 与 PR 上运行后端全量测试与前端构建。
+以下是预约和微服务拆分前的历史压测基线，当前链路需要重新压测，不能直接作为现版本容量结论：
 
-## 性能压测
+| 场景 | 并发 / 样本 | 吞吐量 | 平均响应 | p95 |
+| :--- | :---: | :---: | :---: | :---: |
+| 签到状态查询（Bitmap） | 200 / 10,000 | 2,860 ~ 3,005 req/s | 60 ~ 65 ms | 75 ~ 90 ms |
+| 演出详情高频读（Cache） | 200 / 4,000 | 3,463 ~ 4,499 req/s | 22 ~ 35 ms | 34 ~ 64 ms |
+| 秒杀抢票并发写（Lua + MQ） | 100 / 1,000 | 1,012 ~ 1,101 req/s | 41 ~ 54 ms | 87 ~ 122 ms |
 
-使用 Apache JMeter 5.6.3 在 CLI 模式下执行（2026-09-03，连续 3 轮）。第 1 轮是容器重启后的冷启动，只有稳态的 63% ~ 82%，故下表取第 2、3 轮的稳态区间。数字来自 JMeter dashboard 而非 summariser——后者的分母含线程创建开销并取整到秒，会低估 23%：
+强一致性结论：三轮 100 并发争抢 50 张票，Redis 结余为 0，MySQL 落库 50 笔，零超卖、零少卖、一人一票排重率 100%。完整方法见 [`benchmark/BENCHMARK_REPORT.md`](benchmark/BENCHMARK_REPORT.md)。
 
-| 压测场景 | 目标接口 | 并发 | 样本 | 吞吐量（稳态区间） | 平均响应 | p95 |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| 签到状态查询（Bitmap） | `GET /user/sign/status` | 200 | 10,000 | **2,860 ~ 3,005 req/s** | 60 ~ 65 ms | 75 ~ 90 ms |
-| 演出详情高频读（Cache） | `GET /event/1` | 200 | 4,000 | **3,463 ~ 4,499 req/s** | 22 ~ 35 ms | 34 ~ 64 ms |
-| 秒杀抢票并发写（Lua+MQ） | `POST /ticket-orders/reserve/3` | 100 | 1,000 | **1,012 ~ 1,101 req/s** | 41 ~ 54 ms | 87 ~ 122 ms |
+## 6. 技术栈选型
 
-客户端与服务端同机，JMeter 自身也占 CPU，因此这是「该配置在这台机器上的相对表现」，不是服务端容量上限。详情页两轮相差 29.9%（配置完全相同），所以**小于 30% 的差异在本环境下无法与噪声区分**，报告中不对小幅差异下结论。
+### 核心业务
 
-秒杀场景的「零错误」指 HTTP 层：1,000 笔请求全是 200，但真正下单成功的只有 50 笔，其余 950 笔是业务层的库存不足与限购拒绝（响应体 `code` 非 200，HTTP 状态仍是 200）。该吞吐量衡量的是链路处理能力，不是每秒成交 1,000 单。
+- **Java 17 + Spring Boot 3.x**：提供长期支持的运行时和清晰的 Web、事务、定时任务基础。
+- **MyBatis-Plus 3.x**：普通增删改查减少样板代码；行锁、幂等插入和联表查询保留在 Mapper.xml，关键 SQL 可控。
+- **Vue 3 + TypeScript**：实现活动详情、预约状态、订单和候补等交互，类型检查降低前端接口变更风险。
 
-**强一致性核对**：100 并发争抢 50 张限量票（打入 1,000 笔请求），三轮均通过——Redis 预扣结余精确为 0，MySQL 最终落库 50 笔，零超卖、零少卖，一人一票排重率 100%。
+### 基础设施
 
-完整的测量方法、噪声基准与调优过程记录在 [`benchmark/BENCHMARK_REPORT.md`](benchmark/BENCHMARK_REPORT.md)。
+- **Redis 7.x**：承载登录态、热点缓存和库存预扣；Lua 保证检查与扣减的原子性，Bitmap 支持签到。
+- **MySQL 8.x**：保存预约、候补、订单和积分等最终事实，依靠事务、行锁和唯一索引兜底。
+- **RabbitMQ 3.x**：把建单、延时关单和失败补偿移出请求线程，吸收突发流量并支持重试。
+- **Spring Cloud / Gateway / Nacos / OpenFeign**：提供统一入口、服务发现、配置管理和跨服务调用，保持业务边界清晰。
 
-压测需要本机安装 JMeter，并把可执行文件路径写入 `.env` 的 `JMETER_EXEC`（不填则取 PATH 中的 `jmeter`）：
+### 测试与交付
 
-```bash
-# 1. 造压测用 Token（需后端与容器已启动）
-python3 benchmark/generate_tokens.py
+- **JUnit 5 + Testcontainers**：在真实中间件环境验证并发和消息行为，减少“本机能过、部署失败”。
+- **Apache JMeter 5.6**：测量吞吐、P95/P99 和库存对账，不只看 HTTP 成功率。
+- **Docker Compose + GitHub Actions**：本地编排中间件，CI 构建并推送镜像，线上只拉取固定版本。
 
-# 2. 执行全部场景并生成 HTML 报告
-pwsh ./benchmark/run_all_benchmarks.ps1
-```
-
-脚本在 Windows PowerShell 5.1 与 Linux/macOS 的 PowerShell Core（`pwsh`）下均可运行。
-
-## 快速启动
-
-准备环境变量：
-
-```bash
-cp .env.example .env
-```
-
-`.env` 中的 `DB_PASSWORD`、`TICKET_REDIS_PASSWORD`、`TICKET_RABBITMQ_USERNAME`、`TICKET_RABBITMQ_PASSWORD` 为必填项，缺失时 Docker Compose 会直接报错退出而不是静默使用空密码。
-
-启动基础服务（MySQL、Redis、RabbitMQ）：
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-前后端也一起跑在容器里，省掉本机的 JDK、Maven 与 Node：
-
-```bash
-docker compose --profile full up -d --build
-```
-
-前端 `http://localhost:5173`，后端 `http://localhost:8080`。容器内前端把 `/api` 与 `/uploads` 反向代理到后端服务，两者通过 Docker 内部网络通信。
-
-需要热更新时改用本机启动。后端：
-
-```bash
-cd ticket-center-api
-mvn spring-boot:run
-```
-
-前端另开一个终端：
-
-```bash
-cd ticket-center-web
-npm install
-npm run dev
-```
-
-## 接口调试
-
-常用请求整理在 [`ticket-center-api/docs/api-demo.http`](ticket-center-api/docs/api-demo.http)，可直接在 IDEA 或 VS Code 中发起。
-
-开发环境的登录验证码不发短信，写入 Redis：
-
-```text
-tc:login:code:{手机号}
-```
-
-登录接口返回的 Token 直接放入 `authorization` 请求头，不加 `Bearer` 前缀。
-
-## 目录结构
+## 7. 目录结构
 
 ```text
 ticket-center/
-├─ ticket-center-api/        Spring Boot 后端
-│  ├─ src/main/resources/lua/     Redis 原子脚本（预扣、回滚、验证码消费）
-│  ├─ src/main/resources/db/      建表与种子数据
-│  └─ src/test/                   单元测试与 Testcontainers 集成测试
-├─ ticket-center-web/        Vue 3 用户端
-├─ benchmark/               JMeter 压测计划、诊断脚本与验收报告
-├─ docs/images/             README 演示图片
-├─ docker-compose.yml       MySQL、Redis、RabbitMQ（前后端在 full profile 下）
-└─ PROGRESS.md              优化决策与排查记录
+├─ pom.xml                         Maven 多模块父工程
+├─ ticket-common/                  通用响应、会话校验、配置、跨服务 DTO
+├─ ticket-center-api/              用户、活动与社区服务，ticket_center 库
+├─ order-service/                  交易与积分服务，ticket_order 库
+│  ├─ src/main/resources/lua/      库存预扣、回补、候补脚本
+│  ├─ src/main/resources/db/       交易库 SQL
+│  └─ src/test/                    预约、候补、订单一致性测试
+├─ ticket-gateway/                 统一入口与服务路由
+├─ ticket-center-web/              Vue 3 用户端
+├─ deploy/                         MySQL 账号和 Nacos 配置初始化
+├─ benchmark/                      JMeter 计划、Linux 脚本与报告
+├─ docs/DEPLOYMENT.md              详细部署说明
+├─ Dockerfile                      CI 构建 Java 镜像，线上不需要
+├─ docker-compose.middleware.yml   MySQL、Redis、RabbitMQ、Nacos
+├─ docker-compose.init.yml         数据库账号和 Nacos 配置初始化
+├─ docker-compose.app.yml          GHCR 应用镜像
+└─ PROGRESS.md                     优化决策与排查记录
 ```
 
-## 已知边界
+## 8. 设计边界与后续规划
 
-- 支付仅为订单状态流转，未接入真实支付平台；验证码只写入 Redis，未接入短信服务。
-- MySQL 与 Redis 之间没有分布式事务。预扣成功到消息到达 broker 之间存在一个无保护窗口：进程此刻崩溃会导致该笔预扣既不落库也不回滚，表现为少卖。彻底解决需要本地消息表或事务消息，当前规模下选择用死信补偿 + 定时扫库把窗口压到最小，并在文档中显式标注。
-- 死信补偿重试耗尽后消息会进入补偿失败队列，该队列目前没有消费者，需人工介入对账。
-- 登录接口尚未对校验失败次数做限流，验证码与密码登录均缺少失败锁定。
-- 压测脚本的 Linux 分支尚未在真实 Linux 环境实跑验证。
+- 支付目前只做订单状态流转，验证码只写入 Redis，未接入真实支付和短信服务。
+- Nacos 是单节点开发部署，Redis 当前也是单节点，不能据此宣称生产高可用。
+- MySQL 与 Redis 没有分布式事务；预约通过持久化任务重试，恢复前可能短暂处于处理中。
+- 死信补偿失败队列暂需人工对账；登录校验失败暂未做限流和锁定。
+- 候补每个票档只处理一个进行中的递补，吞吐量需要单独压测。
 
-更详细的优化过程、踩坑记录与未修项清单见 [`PROGRESS.md`](PROGRESS.md)。
+后续可按优先级推进：生产环境 Redis Sentinel/Nacos 集群、可靠消息 Outbox、真实支付回调、补偿失败告警和候补批量递补。
+
+## 9. 快速启动 / 部署说明
+
+详细环境变量、初始化说明和本机调试方式见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。线上只需要三份 Compose、`deploy/` 和 `.env`，不需要源码或 Dockerfile：
+
+```bash
+cp .env.example .env
+docker login ghcr.io                 # 私有 GHCR 仓库需要，公开仓库可跳过
+docker compose -f docker-compose.middleware.yml -f docker-compose.init.yml -f docker-compose.app.yml --profile full pull
+docker compose -f docker-compose.middleware.yml -f docker-compose.init.yml -f docker-compose.app.yml --profile full up -d
+docker compose -f docker-compose.middleware.yml -f docker-compose.init.yml -f docker-compose.app.yml --profile full ps
+```
+
+## 10. 接口说明 / 演示地址
+
+- **本机演示地址**：前端 `http://localhost:5173`，Gateway `http://localhost:8080`，Nacos 控制台 `http://localhost:8848/nacos`
+- **接口示例**：[`ticket-center-api/docs/api-demo.http`](ticket-center-api/docs/api-demo.http)
+- **预约接口**：`POST /ticket-orders/reserve/{ticketId}` 返回预约号；`GET /ticket-reservations/{reservationId}` 查询处理结果；`GET /ticket-reservations/me` 查询当前用户记录。
+- **订单操作**：使用预约记录中的 `orderId` 支付或取消，支付期限从订单创建时开始计算。
+
+登录接口返回的 Token 直接放入 `authorization` 请求头，不加 `Bearer` 前缀。开发环境验证码写入 Redis，不发送短信。

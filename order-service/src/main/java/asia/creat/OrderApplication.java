@@ -1,0 +1,26 @@
+package asia.creat;
+
+import jakarta.annotation.PostConstruct;
+import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+import java.util.TimeZone;
+
+@EnableScheduling
+@EnableFeignClients
+@MapperScan("asia.creat.mapper")
+@SpringBootApplication
+public class OrderApplication {
+
+    @PostConstruct
+    void initTimeZone() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+    }
+
+    public static void main(String[] args) {
+        SpringApplication.run(OrderApplication.class, args);
+    }
+}

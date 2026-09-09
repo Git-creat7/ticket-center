@@ -10,6 +10,9 @@ const props = defineProps<{
   ticket: Ticket | null
   userCredits: number
   loading?: boolean
+  lockedUseCredits?: boolean
+  error?: string
+  kind?: 'reservation' | 'waitlist'
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +27,7 @@ watch(
   () => props.visible,
   (val) => {
     if (val) {
-      useCredits.value = props.userCredits > 0
+      useCredits.value = props.lockedUseCredits ?? props.userCredits > 0
     }
   },
 )
@@ -48,23 +51,28 @@ const finalPriceFen = computed(() => {
 })
 
 function close() {
+  if (props.loading) return
   emit('update:visible', false)
 }
 
 function handleConfirm() {
-  emit('confirm', useCredits.value && actualDeductFen.value > 0)
+  if (props.loading) return
+  emit('confirm', props.lockedUseCredits ?? (useCredits.value && actualDeductFen.value > 0))
 }
 </script>
 
 <template>
   <el-dialog
     :model-value="visible"
-    title="确认订单与结算"
-    width="480px"
+    :title="kind === 'waitlist' ? '确认候补' : '确认预约'"
+    width="min(30rem, calc(100% - 2rem))"
     class="checkout-dialog"
     destroy-on-close
     append-to-body
-    @update:model-value="emit('update:visible', $event)"
+    :close-on-click-modal="!loading"
+    :close-on-press-escape="!loading"
+    :show-close="!loading"
+    @update:model-value="close"
   >
     <div v-if="ticket && event" class="checkout-body">
       <!-- 演出与票档概要 -->
@@ -101,7 +109,8 @@ function handleConfirm() {
           <el-switch
             v-if="userCredits > 0"
             v-model="useCredits"
-            :disabled="loading"
+            :disabled="loading || lockedUseCredits !== undefined"
+            aria-label="使用积分抵扣"
           />
         </div>
 
@@ -123,7 +132,7 @@ function handleConfirm() {
         </div>
         <div class="breakdown-divider" />
         <div class="breakdown-row breakdown-row--total">
-          <span>应付总额</span>
+          <span>{{ kind === 'waitlist' ? '预计应付' : '应付总额' }}</span>
           <strong class="total-price">{{ formatPrice(finalPriceFen) }}</strong>
         </div>
       </section>
@@ -131,20 +140,23 @@ function handleConfirm() {
       <!-- 安全与锁定提示 -->
       <div class="checkout-security-note">
         <ShieldCheck :size="14" aria-hidden="true" />
-        <span>预约成功后将锁定座位 15 分钟，请及时前往票夹支付</span>
+        <span>{{ kind === 'waitlist' ? '入队不扣款，递补生成订单后限时支付 15 分钟' : '订单生成后保留名额 15 分钟' }}</span>
       </div>
+      <el-alert v-if="error" :title="error" type="warning" show-icon :closable="false">
+        <RouterLink :to="{ path: '/orders', query: { view: kind === 'waitlist' ? 'waitlists' : 'reservations' } }">查看记录</RouterLink>
+      </el-alert>
     </div>
 
     <template #footer>
       <div class="checkout-footer">
-        <el-button :disabled="loading" @click="close">取消</el-button>
+        <el-button :disabled="loading" @click="close">返回</el-button>
         <el-button
           type="primary"
           :loading="loading"
           class="confirm-btn"
           @click="handleConfirm"
         >
-          <span>{{ loading ? '正在锁定名额...' : '立即确认预约' }}</span>
+          <span>{{ loading ? '正在提交...' : lockedUseCredits !== undefined ? '重试提交' : kind === 'waitlist' ? '确认候补' : '确认预约' }}</span>
         </el-button>
       </div>
     </template>
@@ -225,6 +237,7 @@ function handleConfirm() {
 
 .credits-title-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-body);
@@ -322,6 +335,10 @@ function handleConfirm() {
   gap: var(--space-2);
   font-size: 0.75rem;
   color: var(--color-ink-muted);
+}
+
+.checkout-security-note svg {
+  flex-shrink: 0;
 }
 
 .checkout-footer {

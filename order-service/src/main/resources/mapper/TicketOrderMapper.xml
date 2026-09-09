@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="asia.creat.mapper.TicketOrderMapper">
+
+    <update id="pay">
+        UPDATE tb_ticket_order SET status = 1, pay_time = NOW()
+        WHERE id = #{id} AND user_id = #{userId} AND status = 0
+          AND create_time &gt; DATE_SUB(NOW(), INTERVAL #{timeoutSeconds} SECOND)
+    </update>
+
+    <update id="cancelExpired">
+        UPDATE tb_ticket_order SET status = 2
+        WHERE id = #{id} AND status = 0
+          AND create_time &lt;= DATE_SUB(NOW(), INTERVAL #{timeoutSeconds} SECOND)
+    </update>
+
+    <select id="findExpired" resultType="asia.creat.entity.TicketOrder">
+        SELECT * FROM tb_ticket_order
+        WHERE status = 0 AND create_time &lt;= DATE_SUB(NOW(), INTERVAL #{timeoutSeconds} SECOND)
+        ORDER BY create_time, id LIMIT #{limit}
+    </select>
+</mapper>

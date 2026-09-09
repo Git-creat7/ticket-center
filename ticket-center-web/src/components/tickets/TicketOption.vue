@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import { Clock3, Flame, Ticket as TicketIcon } from 'lucide-vue-next'
 import type { Ticket } from '../../types/api'
-import { formatDateTime, formatPrice, parseBackendDateTime } from '../../utils/format'
+import { formatDateTime, formatPrice } from '../../utils/format'
+import { ticketAvailability } from '../../utils/tickets'
 
 const props = withDefaults(
   defineProps<{
@@ -14,37 +15,29 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   reserve: [ticket: Ticket]
+  waitlist: [ticket: Ticket]
 }>()
 
-const availability = computed(() => {
-  const now = Date.now()
-  const beginAt = parseBackendDateTime(props.ticket.beginTime).getTime()
-  const endAt = parseBackendDateTime(props.ticket.endTime).getTime()
-
-  if (props.ticket.status !== 1) return { label: '已下架', available: false, isUpcoming: false }
-  if (props.ticket.stock <= 0) return { label: '已售罄', available: false, isUpcoming: false }
-  if (Number.isFinite(beginAt) && now < beginAt) return { label: '未开售', available: false, isUpcoming: true }
-  if (Number.isFinite(endAt) && now > endAt) return { label: '已结束', available: false, isUpcoming: false }
-  return { label: '可预约', available: true, isUpcoming: false }
-})
+const availability = computed(() => ticketAvailability(props.ticket))
 
 const availabilityType = computed<'success' | 'warning' | 'info'>(() => {
-  if (availability.value.available) return 'success'
-  return availability.value.isUpcoming ? 'warning' : 'info'
+  if (availability.value.kind === 'reservation') return 'success'
+  return availability.value.kind === 'waitlist' ? 'warning' : 'info'
 })
 
 const isLowStock = computed(() => props.ticket.stock > 0 && props.ticket.stock <= 15)
 
 const actionLabel = computed(() => {
-  if (props.loading) return '预约中'
-  return availability.value.available ? '立即预约' : availability.value.label
+  if (props.loading) return '提交中'
+  if (availability.value.kind === 'waitlist') return '加入候补'
+  return availability.value.kind === 'reservation' ? '立即预约' : availability.value.label
 })
 </script>
 
 <template>
   <el-card
     class="ticket-option"
-    :class="{ 'ticket-option--unavailable': !availability.available }"
+    :class="{ 'ticket-option--unavailable': !availability.kind }"
     shadow="never"
     :body-style="{ padding: '0' }"
     role="article"
@@ -87,8 +80,8 @@ const actionLabel = computed(() => {
         class="ticket-option__action"
         type="primary"
         :loading="loading"
-        :disabled="!availability.available"
-        @click="emit('reserve', ticket)"
+        :disabled="!availability.kind || loading"
+        @click="availability.kind === 'waitlist' ? emit('waitlist', ticket) : emit('reserve', ticket)"
       >
         {{ actionLabel }}
       </el-button>

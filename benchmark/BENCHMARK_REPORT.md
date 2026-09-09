@@ -2,7 +2,7 @@
 
 > **测量时间**：2026-09-03
 > **工具**：Apache JMeter 5.6.3（CLI 模式，`-n -t -l -e -o`）
-> **被测服务**：`docker compose --profile full`，后端与中间件均在容器内
+> **被测服务**：组合 `docker-compose.middleware.yml`、`docker-compose.init.yml`、`docker-compose.app.yml`，后端与中间件均在容器内
 > **环境**：Spring Boot 3.5.14 / Java 17 / Tomcat 10.1、MySQL 8.4（HikariCP）、Redis 7（Lettuce `max-active: 50` + Redisson + Lua + Bitmap）、RabbitMQ 3.13
 
 ## 一、测量口径
@@ -82,24 +82,30 @@
 
 压测本身是抽样验证，正确性由自动化测试守住：`TicketReserveConcurrencyTest` 断言 200 线程抢 10 张时成功数恰好 10、库存精确归零、库存键缺失时不放行；`TicketOrderConsistencyTest` 覆盖死信补偿、重复投递幂等与超时关单。这两个测试跑在 Testcontainers 拉起的真实中间件上，不依赖手工压测复现。
 
-## 六、复现方式
+## 六、当前运行方式
+
+上面的数字来自旧单体版本，不能用新版脚本直接复现。当前入口已改为 Linux Bash，并按交易库和异步预约结果对账；详细环境要求见根目录 README。
 
 ```bash
-# 1. 种压测用 Token（Redis 会话带 TTL，隔天必须重种，否则整轮压的是 401）
-python3 benchmark/generate_tokens.py
+# 先检查小规模链路
+bash benchmark/run_all_benchmarks.sh smoke
 
-# 2. 执行全部场景并生成 HTML 报告
-pwsh ./benchmark/run_all_benchmarks.ps1
+# 再执行默认规模压测
+bash benchmark/run_all_benchmarks.sh
 ```
 
-需本机安装 JMeter，路径写入仓库根 `.env` 的 `JMETER_EXEC`（不填则取 PATH）。产物落在 `results/`（JTL 明细）与 `reports/`（dashboard），两者均已在 `.gitignore` 中，不入库。**脚本每次执行都会清空这两个目录**，需要跨轮对比时先把 `statistics.json` 拷出去。
+需要 Java 17、JMeter 5.6.3、Python 3 和 Docker CLI。JMeter 不在 PATH 中时，在 Linux 终端通过 `export JMETER_EXEC=/path/to/apache-jmeter-5.6.3/bin/jmeter` 指定启动器。脚本为每轮新建专用票档、生成 Token，并将结果分别保存到 `results/<本轮编号>/` 和 `reports/<本轮编号>/`，不覆盖历史报告，也不清空演示订单。
 
-脚本会自动查出当前 Redis 主节点再重置库存，不假设主节点是哪个容器——主节点漂移后，往从节点写会被 `READONLY` 拒绝，而重置命令是静默的，失败了也照跑。
-
-Windows 上把 `pwsh` 换成 `powershell`。若执行策略拦住脚本（**仅 Windows**，PowerShell Core 不做此校验），只为当前会话放开，不要全局改动或用 `-ExecutionPolicy Bypass`：
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-```
+当前 Compose 使用单节点 Redis，不会自动检测主从切换。脚本支持通过 `REDIS_CONTAINER` 指定容器，且会在预约处理完成后同时核对库存、资格和预约记录。报告中的预约延迟只代表接口受理时间，异步出票延迟需要另行测量。
 
 调优过程、历史前后对比与踩坑记录见 [`PROGRESS.md`](../PROGRESS.md)。
+
+## 七、Linux 入口验证
+
+2026-09-08 在 WSL Ubuntu 中使用 Java 17、JMeter 5.6.3，对独立 `ticket-center-smoke` 环境验证：
+
+- `smoke`：三个场景各 20 个请求，5 张票对应 5 笔订单，库存和预约记录核对通过。
+- `full`：签到 10000 次、详情 4000 次、预约 1000 次，无异常响应；50 张票对应 50 个不同用户的订单，MySQL / Redis 剩余库存均为 0。
+- 故意传入不存在的活动 ID：20 个详情请求全部被断言标记失败，入口退出码为 1，没有执行创建票档步骤。
+
+这次验证确认 Linux 入口和结果校验能工作，不用于更新上面的历史性能数据。稳定吞吐和延迟仍需在相同环境与数据下重复测量，预约受理耗时不能代替异步出票耗时。

@@ -3,7 +3,11 @@
 @code = 替换为Redis中的6位验证码
 @token = 替换为登录返回的Token
 @password = 替换为8到64位密码
-@orderId = 替换为预约返回的订单ID
+@requestId = reservation-demo-001
+@reservationId = 替换为预约返回的预约号
+@orderId = 替换为预约查询结果中的orderId
+@waitlistId = 替换为加入候补返回的候补号
+@waitlistRequestId = waitlist-demo-001
 
 ### 1. 生成验证码
 POST {{baseUrl}}/user/code?phone={{phone}}
@@ -43,7 +47,15 @@ Content-Type: application/json
 GET {{baseUrl}}/ticket/of/event/1
 
 ### 7. 预约票档 1
-POST {{baseUrl}}/ticket-orders/reserve/1
+POST {{baseUrl}}/ticket-orders/reserve/1?requestId={{requestId}}
+authorization: {{token}}
+
+### 7A. 查询本次预约结果
+GET {{baseUrl}}/ticket-reservations/{{reservationId}}
+authorization: {{token}}
+
+### 7B. 查询我的预约记录
+GET {{baseUrl}}/ticket-reservations/me?current=1&size=10
 authorization: {{token}}
 
 ### 8. 查询我的订单
@@ -58,6 +70,22 @@ authorization: {{token}}
 POST {{baseUrl}}/ticket-orders/cancel/{{orderId}}
 authorization: {{token}}
 
-### 10. 退出登录
+### 10A. 售罄后加入候补
+POST {{baseUrl}}/ticket-waitlists/join/1?requestId={{waitlistRequestId}}&useCredits=false
+authorization: {{token}}
+
+### 10B. 查询候补结果
+GET {{baseUrl}}/ticket-waitlists/{{waitlistId}}
+authorization: {{token}}
+
+### 10C. 查询我的候补记录
+GET {{baseUrl}}/ticket-waitlists/me?current=1&size=10
+authorization: {{token}}
+
+### 10D. 取消排队中的候补
+POST {{baseUrl}}/ticket-waitlists/cancel/{{waitlistId}}
+authorization: {{token}}
+
+### 11. 退出登录
 POST {{baseUrl}}/user/logout
 authorization: {{token}}

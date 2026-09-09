@@ -1,0 +1,87 @@
+server:
+  port: ${SERVER_PORT:8083}
+spring:
+  application:
+    name: order-service
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:./application-local.yaml
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${ORDER_DB_URL:jdbc:mysql://localhost:3306/ticket_order?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${ORDER_DB_USERNAME:ticket_order}
+    password: ${ORDER_DB_PASSWORD:${DB_PASSWORD:}}
+  data:
+    redis:
+      host: ${TICKET_REDIS_HOST:localhost}
+      port: ${TICKET_REDIS_PORT:6379}
+      password: ${TICKET_REDIS_PASSWORD:}
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 50
+          max-idle: 50
+          min-idle: 8
+          max-wait: 2s
+          time-between-eviction-runs: 10s
+  rabbitmq:
+    host: ${TICKET_RABBITMQ_HOST:localhost}
+    port: ${TICKET_RABBITMQ_PORT:5672}
+    username: ${TICKET_RABBITMQ_USERNAME:}
+    password: ${TICKET_RABBITMQ_PASSWORD:}
+    virtual-host: ${TICKET_RABBITMQ_VHOST:/}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        concurrency: 5
+        max-concurrency: 10
+        prefetch: 10
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 5s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+      config:
+        enabled: false
+        import-check:
+          enabled: false
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 2000
+            readTimeout: 3000
+  jackson:
+    default-property-inclusion: non_null
+mybatis-plus:
+  type-aliases-package: asia.creat.entity
+logging:
+  level:
+    asia.creat: debug
+ticket:
+  internal-token: ${TICKET_INTERNAL_TOKEN:}
+  clients:
+    core-url: ${TICKET_API_URL:http://localhost:8082}
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9083}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never

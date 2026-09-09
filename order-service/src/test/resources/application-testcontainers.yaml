@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+  data:
+    redis:
+      password:
+  rabbitmq:
+    virtual-host: /
+ticket:
+  internal-token: test-internal-token

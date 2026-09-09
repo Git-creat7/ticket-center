@@ -1,0 +1,108 @@
+services:
+  ticket-center-api:
+    profiles: ["full"]
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-center-api:${TICKET_IMAGE_TAG:-latest}"
+    container_name: ticket-center-api
+    ports:
+      - "127.0.0.1:${CORE_HOST_PORT:-8082}:8082"
+    environment:
+      DB_URL: "jdbc:mysql://mysql:3306/ticket_center?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      DB_USERNAME: "${DB_USERNAME:-ticket_core}"
+      DB_PASSWORD: "${DB_PASSWORD:?请先在 .env 中设置 DB_PASSWORD}"
+      TICKET_REDIS_HOST: redis
+      TICKET_REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?请先在 .env 中设置 TICKET_REDIS_PASSWORD}"
+      TICKET_INTERNAL_TOKEN: "${TICKET_INTERNAL_TOKEN:?请先在 .env 中设置 TICKET_INTERNAL_TOKEN}"
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_PROFILES_ACTIVE: cloud
+      TICKET_OSS_ENABLED: "${TICKET_OSS_ENABLED:-false}"
+      TICKET_OSS_ENDPOINT: "${TICKET_OSS_ENDPOINT:-https://oss-cn-beijing.aliyuncs.com}"
+      TICKET_OSS_BUCKET: "${TICKET_OSS_BUCKET:-}"
+      TICKET_OSS_PUBLIC_DOMAIN: "${TICKET_OSS_PUBLIC_DOMAIN:-}"
+      TICKET_OSS_OBJECT_PREFIX: "${TICKET_OSS_OBJECT_PREFIX:-uploads}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-}"
+      TICKET_OSS_SECURITY_TOKEN: "${TICKET_OSS_SECURITY_TOKEN:-${ALIBABA_CLOUD_SECURITY_TOKEN:-}}"
+      TICKET_OSS_CLI_PROFILE: "${TICKET_OSS_CLI_PROFILE:-}"
+    volumes:
+      - backend-uploads:/app/uploads
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nacos-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  order-service:
+    profiles: ["full"]
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/order-service:${TICKET_IMAGE_TAG:-latest}"
+    container_name: order-service
+    ports:
+      - "127.0.0.1:${ORDER_HOST_PORT:-8083}:8083"
+    environment:
+      ORDER_DB_URL: "jdbc:mysql://mysql:3306/ticket_order?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      ORDER_DB_USERNAME: "${ORDER_DB_USERNAME:-ticket_order}"
+      ORDER_DB_PASSWORD: "${DB_PASSWORD:?请先在 .env 中设置 DB_PASSWORD}"
+      TICKET_REDIS_HOST: redis
+      TICKET_REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?请先在 .env 中设置 TICKET_REDIS_PASSWORD}"
+      TICKET_RABBITMQ_HOST: rabbitmq
+      TICKET_RABBITMQ_USERNAME: "${TICKET_RABBITMQ_USERNAME:?请先在 .env 中设置 TICKET_RABBITMQ_USERNAME}"
+      TICKET_RABBITMQ_PASSWORD: "${TICKET_RABBITMQ_PASSWORD:?请先在 .env 中设置 TICKET_RABBITMQ_PASSWORD}"
+      TICKET_INTERNAL_TOKEN: "${TICKET_INTERNAL_TOKEN:?请先在 .env 中设置 TICKET_INTERNAL_TOKEN}"
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_PROFILES_ACTIVE: cloud
+    depends_on:
+      mysql-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      nacos-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    profiles: ["full"]
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-gateway:${TICKET_IMAGE_TAG:-latest}"
+    container_name: ticket-gateway
+    ports:
+      - "${BACKEND_HOST_PORT:-8080}:8080"
+    environment:
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_PROFILES_ACTIVE: cloud
+    depends_on:
+      ticket-center-api:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    profiles: ["full"]
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-web:${TICKET_IMAGE_TAG:-latest}"
+    container_name: ticket-frontend
+    environment:
+      VITE_API_TARGET: "http://gateway:8080"
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:5173"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend-uploads:

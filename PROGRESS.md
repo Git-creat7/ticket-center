@@ -33,8 +33,6 @@
 - [x] **Testcontainers 改造**：`src/test/java/asia/creat/support/IntegrationTestcontainers.java` 统一起 mysql:8.4（`withInitScript("db/ticket.sql")`）、redis:7-alpine、rabbitmq:3.13-management，`@DynamicPropertySource` 注入随机映射端口，集成测试不再依赖手动启动的中间件，也不再受本机 3306 占用影响
 - [x] 后端 Dockerfile + 纳入 docker-compose，实现一条命令跑起全栈
 - [x] **GitHub Actions**：`.github/workflows/ci.yml` 两个 job，后端 `mvn -B test`（Testcontainers 跑全量集成测试）、前端 `npm ci` + `npm run build`，无 `continue-on-error`
-- [ ] 积分抵扣上限 `1000L` 抽为常量（`TicketOrderServiceImpl.java:194`）
-- [ ] Lua 区分"缓存未预热"与"库存售罄"的返回码
 - [x] **修复删除图片的路径穿越漏洞**（见优化记录 8）
 - [x] **修复签到与点赞的 check-then-act 并发缺陷**（见优化记录 9）
 - [x] **全量 review 的 P0/P1/P2 三档修复**（见优化记录 13）
@@ -55,12 +53,6 @@
 - **修复**：`tb_ticket_order` 增加 `used_credits` 列，下单时把实际抵扣值写进订单快照，取消时直接按该列退还。顺带去掉了这里已无用的 `ticketMapper.selectById`。
 - **记忆点**：**订单是快照，不是外键的视图**。凡是"下单那一刻的事实"——成交价、抵扣额、折扣率、税率——都要落在订单行上，不能事后从关联表反推。关联表的值会漂移，订单的历史不该跟着漂。这类 bug 平时测不出来，只在"改了价 + 取消老订单"的组合下才暴露，属于典型的资损型缺陷。
 
-### 3. Lua 脚本用 ARGV 传 key，不兼容 Redis Cluster
-
-- **问题**：库存键和一人一票键都是在 Lua 脚本内部字符串拼接出来的，`execute` 传的 KEYS 是空列表。单机 Redis 正常，但集群模式下 Redis 无法做 slot 校验，脚本会被拒绝或路由错误。
-- **修复**：两个 key 改由 KEYS 传入；key 格式从 `tc:ticket:stock:3` 改为 `tc:ticket:{3}:stock`，用 `{ticketId}` 作 hash tag 保证两键同槽。`RedisConstants` 的字符串常量换成 `ticketStockKey()` / `ticketOrderKey()` 方法。
-- **波及面**：2 个 Lua 脚本、`RedisConstants`、`TicketStockCacheInitializer`、`TicketServiceImpl`、`TicketOrderConsistencyTest`（3 组）、`run_all_benchmarks.ps1`（4 处），共 6 个文件。
-- **记忆点**：**Lua 里的 key 必须走 KEYS，这不是风格问题是协议要求**。Redis 靠 KEYS 声明来判断脚本触碰了哪些 slot；写进 ARGV 或硬编码在脚本里，集群就无从校验。多个 key 需要原子操作时，还得用 hash tag 把它们钉在同一 slot——`{}` 内的内容才参与哈希计算。**这个改造成本随时间递增**：上线后再改，就得处理存量键迁移和一人一票记录丢失。
 
 ### 4. 兜底定时任务全表拉取且多实例重复执行
 
@@ -68,11 +60,6 @@
 - **修复**：加 Redisson `tryLock`，拿不到锁直接跳过本轮；查询加 `orderByAsc("create_time")` + `limit 500`。
 - **记忆点**：**兜底任务的危险在于它平时不干活**。因为常态是空集，容量问题在测试和日常运行中永远不暴露，只在主链路已经出故障时才引爆——正好是系统最脆弱的时刻。所以兜底逻辑必须自带限流。另外多实例下 CAS 能保证结果正确，但不能免除重复劳动，锁是省资源不是保正确。
 
-### 5. 压测套件的硬编码凭据与绝对路径（交付问题）
-
-- **问题**：`run_all_benchmarks.ps1` 里明文写着 Redis 与 MySQL 密码（3 处调用），JMeter 计划、Python 脚本、压测报告中散布着 `F:/CodeProject/ticket-center/...` 绝对路径，换台机器整套压测跑不起来、报告链接全是死链。
-- **修复**：凭据统一从仓库根 `.env` 读取，缺失则报错退出；路径改为 `$PSScriptRoot` / `Path(__file__).parent` 自定位，JMeter CSV 改用裸文件名由 FileServer 按 jmx 目录解析；`.env.example` 补 `DB_USERNAME`、`JMETER_EXEC`。
-- **记忆点**：**密码从未进过 git 历史（该文件当时还在未追踪状态），但明文在磁盘上存在过就该轮换**。另外压测产物（`reports/` 含约 1.7 万个第三方静态资源、`jmeter_tokens.csv` 含 100 条 token）此前既未追踪也未忽略，一次 `git add -A` 就会全部入库——**"没被提交"和"不会被提交"是两回事**，生成物必须显式写进 `.gitignore`。
 
 ### 6. 详情页伪缓存穿透放大与 UV 读写解耦（调优实战）
 
@@ -92,18 +79,8 @@
 - **记忆点 3**：**判断一个差异是否真实，前提是先知道"什么都不改能差多少"**。这条结论我改了两次：只做 A/B 两次测量时，看到 12.3% 的差异很自然归因为配置；加测一轮同配置复现（差 9.8%）后改判"无法区分"；再加两轮才发现同配置极差达 **28.8%**，噪声比最初估计的高三倍。**没有噪声基准的对照实验，产出的是故事不是结论；而噪声基准本身也需要足够的样本量才可信。**
 - **记忆点 4**：**统计脚本本身也会撒谎**。`run_all_benchmarks.ps1` 原先用 `Max(1, duration)` 兜底除零，压测跑进 1 秒内时分母被钉死，4,000 样本直接算成"4,000 QPS"。这个数字看起来完全正常、不会报错，只会静静地进报告。已修复。
 
-### 7. 缓存中 LocalDateTime 的时区依赖（隐患，容器化前修复）
 
-- **问题**：`CacheClient` 用 Hutool `JSONUtil` 序列化，`LocalDateTime` 被存为毫秒时间戳（实测 raw JSON 中 `beginTime: 1786636800000`）。`LocalDateTime` 本身不带时区，转时间戳与还原都依赖 **JVM 默认时区**。全库检索确认此前没有任何地方固定过时区，只有 JDBC URL 里的 `serverTimezone=Asia/Shanghai`。
-- **触发条件**：不同实例时区不一致时读到同一份缓存——典型场景是官方 JRE 镜像默认 UTC，而开发机是 Asia/Shanghai，票档时间集体偏 8 小时。滚动发布期间新旧实例并存同样会触发。
-- **修复**：`Application.initTimeZone()` 用 `@PostConstruct` 固定 JVM 默认时区；Dockerfile 同时设 `ENV TZ=Asia/Shanghai` 作双重保险。
-- **记忆点**：**往返测试无法覆盖环境差异**。`EventDetailSerializationTest` 写入和读取在同一个 JVM 里完成，时区必然一致，所以它必然通过——它验证的是"编解码逻辑对不对"，而不是"跨环境解释一不一致"。**凡是序列化结果依赖运行环境隐式状态（时区、默认字符集、Locale）的地方，同进程往返测试都是盲的。** 判断方法：问自己"如果另一台机器来读这份数据，它需要知道什么才能正确解释？"——需要的东西如果没写进数据本身，就是隐患。
 
-### 8. 删除图片存在路径穿越（安全漏洞）
-
-- **问题**：`FileStorageService.deleteImage` 直接把入参拼到 `user.dir` 后面就删，没有 `normalize()`、没有校验结果目录。`DELETE /upload/image?name=../.env` 能删到仓库外的任意文件，且该接口只有登录拦截、无权限校验。
-- **修复**：先把 `uploads` 目录解析成绝对路径基准，再 `resolve` + `normalize` 目标路径，**用 `startsWith(uploadRoot)` 确认仍在目录内**，不在就拒绝并记日志。
-- **记忆点**：**路径校验必须在 `normalize()` 之后做，而不是在拼接前过滤字符串**。过滤 `..` 这类黑名单永远漏（编码变体、符号链接、多层组合），而 `normalize()` 之后比较前缀是白名单思路——先算出"它实际指向哪"，再问"这个位置我允许吗"。凡是把用户输入拼进文件路径、URL、SQL 标识符的地方，都该用这个顺序。
 
 ### 9. 签到与点赞"先读后写"，并发下积分/计数发双份
 
@@ -115,26 +92,6 @@
   - 第一版断言写错过：断言 ZSet `zCard <= 1` 是**恒真的**（ZSet 成员本身不可重复，这个断言永远不会失败）。改成断言"Redis 集合里有没有这个用户"与"`liked` 变化量"必须一致——点赞修复把 Redis 写入提到了 DB 之前，这条才真正卡住"集合加了人但计数没加"的脱节。
 - **记忆点 1**：**"检查后写入"（check-then-act）是并发 bug 的标准模板**，`SETBIT`/`ZADD`/`ZREM`/`SETNX` 这些命令的返回值本身就是"我是不是那个改变了状态的人"的答案，用它替代额外的一次读，就把两步合成一步。看到"先查再改"的代码就该问：这两步之间如果插进另一个请求会怎样？
 - **记忆点 2**：**一个永远不会失败的断言，和没有断言是一回事**，但它更糟——它让人以为验证过了。写完断言要反问"什么输入能让它红"，答不出来就说明它没在测东西。
-
-### 10. 容器化的三个问题（补全 Dockerfile 与 compose）
-
-跑 `docker compose build` 之前先逐行核了一遍 Dockerfile 与 compose，查出三处问题，都不是语法错误——`docker compose config` 全程通过。
-
-- **uploads 目录属主是 root，非 root 容器写不进去**：`WORKDIR /app` 创建的目录属主是 root，而镜像 `USER ticket`。`ticket.oss.enabled` 默认 `false`，也就是说**默认路径就是往本地磁盘写**，`FileStorageService` 落盘到 `/app/uploads` 时必然权限失败。修复：`mkdir -p /app/uploads` 后 `chown -R ticket:ticket /app`，且 `COPY --from=builder --chown=ticket:ticket`。
-- **backend 服务抢占 8080，打断了 README 写的开发方式**：这个问题是我自己加 backend 服务时引入的。README 的流程是"容器跑中间件 + 本机 `mvn spring-boot:run`"，一旦 `docker compose up -d` 把 backend 也拉起来，本机的 8080 就被占了。修复：给 backend 加 `profiles: ["full"]`，默认 `up -d` 不含它，整套容器化用 `--profile full`。
-- **uploads 未挂卷，`down` 之后图片全丢**：未开 OSS 时图片只存在容器内。加 `backend-uploads` 命名卷。
-- **记忆点**：**`docker compose config` 通过只代表配置能解析，不代表容器能跑。** 权限、属主、端口占用、数据持久性都在它的检查范围之外。这三个问题里有两个要等到运行时才暴露，而第三个（端口冲突）是"新增一个服务"这个动作的副作用——**加东西也会改变原有行为**，不只是改东西才会。
-
-### 11. 初始化脚本导入后中文全部二次编码
-
-- **问题**：容器化后走 HTTP 打 `/event/hot`，演出名称返回 `è¥¿æ¹–å›½é™…éŸ³ä¹èŠ‚`。库里 `tb_event.name` 存的是 **47 字节 / 21 字符**，而"西湖国际音乐节"是 7 个字——每个汉字被存成了 3 个字符。
-- **定位**：把存储字节按 CP1252 逐字节还原（`E8→è, A5→¥, BF→¿, E6→æ, B9→¹, 96→–, 9B→›, 99→™ …`），正好拼回"西湖国际音乐节"的 UTF-8 字节序列。**即原始 UTF-8 字节被当 CP1252 解释成字符，再按 utf8mb4 存了一遍。**
-  - `ticket.sql` 在磁盘上是正确的 UTF-8（实测「西湖」= `E8 A5 BF E6 B9 96`），建表全是 utf8mb4，compose 也设了 `--character-set-server=utf8mb4`——**服务端和文件都没问题，坏在客户端**：`character_set_client / connection / results` 全是 `latin1`。MySQL 官方镜像里 `mysql` CLI 的默认字符集取决于环境 locale，容器 locale 不是 UTF-8 时退化成 latin1，而 initdb 正是用这个 CLI 导入 `/docker-entrypoint-initdb.d/*.sql` 的。`ticket.sql` 原先全文没有 `SET NAMES`。
-  - 影响范围：种子数据 31 行全坏（`tb_event` 的 name/venue/address/intro、`tb_event_category.name`、`tb_ticket.title`）。应用自己写入的表未受影响——连接串带 `characterEncoding=UTF-8`，写入路径是对的，**只有 initdb 这一条路坏了**。
-- **修复**：`ticket.sql` 首行加 `SET NAMES utf8mb4;`，让文件自带字符集声明，导入方式不再影响结果（这也是 `mysqldump` 总在输出里带这一行的原因）。开发库删卷重建。
-  - 已验证的原地修复表达式（生产环境不能删库时用）：`CONVERT(BINARY(CONVERT(col USING latin1)) USING utf8mb4)`。
-- **记忆点 1**：**`mysql` CLI 看到的中文是正常的，应用看到的是乱码，而两者读的是同一份字节。** 因为 `character_set_results` 也是 latin1，输出时又把二次编码反向映射回去了——latin1 进、latin1 出，正好抵消。而 Java 用 `characterEncoding=UTF-8` 连接，拿到的是真实的（已损坏的）字符。**用命令行验证编码问题，验证工具本身的字符集就是实验的一部分**；两端用同一个错误设置，错误会互相掩盖。
-- **记忆点 2**：**"服务端字符集配对了"不等于"数据存对了"**。一次写入要经过文件编码 → 客户端字符集 → 连接字符集 → 表字符集，任何一环声明错都会静默损坏，且**报错一次都不会有**。可靠做法是让数据自带声明（文件里写 `SET NAMES`），而不是依赖导入时的环境。这跟第 7 节缓存时区是同一个模式：**依赖运行环境隐式状态的序列化，换个环境就坏，而且坏得没有声音。**
 
 ### 12. 容器 MySQL 是 UTC，新订单几十秒就被自动关单
 
@@ -163,7 +120,6 @@
 
 **P1 · 安全**
 
-- **权限模型缺失**：`POST /event`、`PUT /event`、`POST /ticket`、`DELETE /upload/image` 只有登录拦截，任何登录用户可创建演出、开票并写入 Redis 库存。前三个补 `tb_user.role` 列 + `AdminInterceptor` + `@RequireAdmin` 注解式声明（拦截器 order=2 排在登录之后，靠注解定位接口而非路径）。**403 用真实 HTTP 状态码**（与 401 同类，都是到不了业务逻辑的场合，见下方错误协议）。
 - **删图接口越权**：`DELETE /upload/image` 走的不是管理员模型——用户本来就该能删自己的图，管理员化会把正常功能锁死。改为**归属校验**：上传时文件名带 `{userId}-{uuid}.{ext}` 前缀，删除时只认前缀里的 userId。归属信息必须落在路径本身，因为图片在评价发布前就能被撤回，此时它还没进任何数据库记录，没有别的地方可查归属。修复前只要求登录，而图片 URL 通过评价接口公开可见——**抓一遍别人的评价就能把他的图全删掉**。没有归属前缀的历史文件一律拒删。（与优化记录 8 的路径穿越是同一个文件的两个不同漏洞：那个是能删到目录外，这个是能删别人的。）
 - **匿名 UV 可无限刷**：未登录访客每次生成新 UUID 塞进 HyperLogLog，基数随刷新次数线性增长。改按 `getRemoteAddr()` 计入。
 - **验证码无发送限流**：同一手机号可无限触发。加 Redis 计数限流。
@@ -172,11 +128,10 @@
 **P2 · 正确性**
 
 - **成交价未在预约时冻结**（与优化记录 2 同源）：`TicketOrderMessage` 只带 id，消费端落库时重读 `ticket.getPrice()`。**暴露窗口是预约到落库之间的 MQ 投递延迟**——正常是毫秒级，但积压、消费重试、死信重入都会把它拉长，这期间运营调价，用户就按他没见过的新价成交。`pay()` 只做 `status = 1, pay_time = NOW()`，不重读票档，所以 15 分钟待支付窗口本身不在暴露面内。修法是在 `reserveTicket` 里把 `ticket.getPrice()` 写进消息（那次查询本来就有，不额外增加 IO），消费端只认快照，`null` 才回退到当前票价（滚动发布期间队列里的旧格式消息）。
-- **分页缺第二排序键**：`ORDER BY hot DESC` / `ORDER BY create_time DESC` 在排序值相同时，MySQL 不保证行顺序，翻页会漏行或重行。review 里只点了热门演出与分类列表两处，实际清查出**四处**：`queryHotEvents`、`queryByCategory`、`queryHotReview`（`liked` 大量为 0，最容易触发）、`myOrders` 与 `queryUserCreditLogs`（`create_time` 只精确到秒，签到与购票抵扣同秒发生很常见）。每处补 `.orderByDesc("id")`。
+
 - **`signCount` 与 `/user/sign/status` 对同一用户给出不同的连签天数**：`signCount` 直接从今天起算，今天还没签到时第一位就是 0，直接返回 0；`getSignStatus` 从昨天起算，返回真实天数。把"今天已签就数到今天，否则数到昨天"抽成 `streakEndDay(today, isTodaySigned)`，两处共用；`getSignStatus` 把已经读过的今日位传进去，不多打一次 Redis（签到接口有未结案的性能回归，不宜再加往返）。
 - **静态资源 404 被兜底处理器吞掉**：`@ExceptionHandler(Exception.class)` 出现在用户 advice 里会盖过 Spring 内建的 `ResponseEntityExceptionHandler`，`NoResourceFoundException` 因此变成 500 + 一条 ERROR 堆栈。实测更糟：**返回的是 HTTP 200 + 500 的 JSON body**，`<img onerror>` 根本不触发，浏览器拿 JSON 当图片渲染。单独加 `@ResponseStatus(HttpStatus.NOT_FOUND)` 的处理器。
-- **错误协议边界无处记录**：业务错误一律 HTTP 200 + `body.code`，真实非 2xx 只用于拦截器鉴权失败与静态资源 404。**没有改成 RESTful 状态码**，因为 `http.ts` 的错误分支只在 2xx 上读 body，非 2xx 走 `AxiosError`，`msg` 会被替换成 `Request failed with status code xxx`——后端写的错误文案全部丢失。约定写进 `Result` 的类注释，两侧各加一条测试钉住。
-- **`fans` / `followee` 从不更新**：两列只在建行时写 0，关注与取关都不维护，而 `ProfilePage` 与 `PersonPage` 都当实时计数展示，页面上永远是 0 关注 0 粉丝。改为读时从 `tb_follow` 实时统计（两个方向都有覆盖索引，只在个人主页这一处冷路径调用），并在实体上标注这两列不可信。**没有选择补写时自增**：这是活的聚合，不是下单价那种历史事实，存起来就要处理关注/取关两条路径的漂移，而 `follow()` 目前没有事务包住 DB 与 Redis 两次写。
+
 - **库存预热不恢复一人一票 Set**：`TicketStockCacheInitializer` 只对 stock key 做 `setIfAbsent`，资格 Set 一直没人管。Redis flush、主从切换丢数据、key 格式迁移之后 Set 是空的，已持活跃订单的用户能再次通过 Lua 的 `sismember`。超卖仍被 MySQL 的 `stock > 0` 与 `uk_user_ticket_active` 挡住，**丢的是用户体验**：预约拿到订单号、页面显示成功，落库时被 `activeCount` 检查拒掉，走完 3 次重试进死信才回滚这次预扣。补 `rebuildReservationSets()`，从 `status IN (0,1)` 的订单按 ticket 分组 `SADD`。
 
 **MQ 补偿链路与事务边界（原「已知问题」B1/B2/B3/C，本轮一并修完）**
@@ -278,13 +233,7 @@
 - **列表类 N+1（2026-08-30 已全部清完）**：订单列表、评价列表、演出列表分类名三处都改成批量。
   - `EventServiceImpl.toListItemVOList()` 原先每条演出一次 `eventCategoryMapper.selectById`，四个列表接口共用。改为复用 `EventCategoryService.queryCategoryList()` 的全量 Redis 缓存（见优化记录 16），实测同一组 7 个用例 `tb_event_category` 查询 **6 次 → 1 次**。
   - `EventReviewServiceImpl.toReviewVO()` 已改为 `toReviewVOList` 批量组装，作者一次 `listByIds`、点赞状态一次 pipeline（见优化记录 15）。
-- **`logging.level.asia.creat: debug` 在所有环境开启**——**已定夺保留，不再作为待修项**。仓库里没有 `application-prod.yaml`、`application.yaml` 也没有任何 `on-profile` 块（见下方 profile 那条），"生产不该开 debug"在当前形态下是假问题；而它带出的 MyBatis SQL 输出是实打实的排查手段，优化记录 15、16 两次夹具缺陷都是靠读 SQL 参数定位的。真上生产时再随 `application-prod.yaml` 一起降级。
-- **本机原生 MySQL 占用 3306，曾让 `mvn test` 静悄悄连错库（2026-08-30 已修）**：容器 MySQL 的宿主映射改为 `127.0.0.1:3307:3306`，`application.yaml` 的 `DB_URL` 默认值同步改成 3307（容器内 backend 由 compose 显式注入 `mysql:3306`，不吃这个默认值）。修复前的表现是全量 `mvn test` 固定 **5 条** `Unknown column 'role'`（`AdminAuthTest` 3 条、`FollowCountTest` 2 条），改到 3307 后全量 51 项全绿，**证明那 5 条从来不是代码缺陷**。
-  - 真正的机关不是端口冲突，是**原生实例 root 空密码**：容器没发布端口时，`localhost:3306` 连上原生实例并且**认证通过**，于是"连错库"伪装成"字段不存在"。原生库建于 P1 权限模型（优化记录 13）之前、没重放过 `db/ticket.sql`，所以 `tb_user` 没有 `role` 列。**认证失败会立刻暴露，认证成功才最贵。**
-  - 排查手法：这类"字段/表不存在"先确认连的是哪个库，别直接读代码。容器没发布端口又要立刻验证时，起一个一次性转发容器最省事，不动任何现有容器：`docker run -d --network <compose 网络> -p 127.0.0.1:3307:3307 alpine/socat tcp-listen:3307,fork,reuseaddr tcp-connect:ticket-mysql:3306`。查端口本身则比对 `docker inspect` 的 `HostConfig.PortBindings`（请求）与 `NetworkSettings.Ports`（生效），不要只看 `docker compose ps` 的 healthy。
-  - 遗留：原生实例的空密码本身建议设个密码或改 `bind-address=127.0.0.1`，那是本机全局改动、超出本项目范围，未处理。
-- **种子数据有孤儿作者**：`tb_event_review` 有 2 条记录的 `user_id = 5`，而 `tb_user` 只有 id 1/2/3。批量组装与原先的逐条实现行为一致（查不到就留 `userName` 为 null），接口不报错，只是列表里这两条没有作者昵称。属开发期脏数据，未清理。
-- **容器内激活的是 `local` profile**：`spring.profiles.active: ${SPRING_PROFILES_ACTIVE:local}`，compose 未传该变量，于是容器启动日志显示 `The following 1 profile is active: "local"`。当前 `application.yaml` 里没有任何 `on-profile` 块、`src/main/resources` 下也没有 `application-local.yaml`（模块根目录那份被 `.dockerignore` 排除），所以**这个 profile 现在不绑定任何配置，实际影响为零**。但一旦后续有人加了 profile 相关配置，开发环境的设置会静默进到容器里。修法是 compose 里传 `SPRING_PROFILES_ACTIVE: docker` 一行。
+
 
 ## 已知边界
 

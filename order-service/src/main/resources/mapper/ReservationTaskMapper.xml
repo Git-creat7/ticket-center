@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="asia.creat.mapper.ReservationTaskMapper">
+
+    <insert id="add">
+        INSERT INTO tb_reservation_task (reservation_id, type)
+        VALUES (#{reservationId}, #{type})
+        ON DUPLICATE KEY UPDATE reservation_id = reservation_id
+    </insert>
+
+    <select id="findDueTasks" resultType="asia.creat.entity.ReservationTask">
+        SELECT *
+        FROM tb_reservation_task
+        WHERE status = 0
+          AND next_retry_time &lt;= NOW(3)
+        ORDER BY next_retry_time, id
+        LIMIT 100
+    </select>
+
+    <update id="claim">
+        UPDATE tb_reservation_task
+        SET attempts = attempts + 1,
+            next_retry_time = DATE_ADD(NOW(3), INTERVAL 30 SECOND)
+        WHERE id = #{id}
+          AND status = 0
+          AND next_retry_time &lt;= NOW(3)
+    </update>
+
+</mapper>

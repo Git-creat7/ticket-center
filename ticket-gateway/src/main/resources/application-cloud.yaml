@@ -1,0 +1,21 @@
+spring:
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.yaml?group=TICKET_CENTER
+  cloud:
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      username: ${NACOS_USERNAME:}
+      password: ${NACOS_PASSWORD:}
+      discovery:
+        enabled: true
+        namespace: ${NACOS_NAMESPACE:}
+        group: TICKET_CENTER
+      config:
+        enabled: true
+        namespace: ${NACOS_NAMESPACE:}
+        group: TICKET_CENTER
+ticket:
+  routes:
+    core: ${TICKET_API_URL:lb://ticket-center-api}
+    order: ${ORDER_SERVICE_URL:lb://order-service}

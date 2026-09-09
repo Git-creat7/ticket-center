@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { CircleX, Clock3, TicketCheck } from 'lucide-vue-next'
 import type { TicketOrder } from '../../types/api'
-import { formatDateTime, formatPrice } from '../../utils/format'
+import { formatDateTime, formatPrice, parseBackendDateTime } from '../../utils/format'
 
 const props = withDefaults(
   defineProps<{
@@ -16,6 +16,17 @@ const emit = defineEmits<{
   pay: [order: TicketOrder]
   cancel: [order: TicketOrder]
 }>()
+
+const now = ref(Date.now())
+const paymentDeadline = computed(() => new Date(parseBackendDateTime(props.order.createTime).getTime() + 15 * 60 * 1000))
+const expired = computed(() => props.order.status === 0 && now.value >= paymentDeadline.value.getTime())
+let timer: ReturnType<typeof setInterval> | undefined
+watch(() => props.order.status, (value) => {
+  clearInterval(timer)
+  now.value = Date.now()
+  if (value === 0) timer = setInterval(() => { now.value = Date.now() }, 1000)
+}, { immediate: true })
+onBeforeUnmount(() => clearInterval(timer))
 
 const status = computed(() => {
   if (props.order.status === 0) {
@@ -40,12 +51,15 @@ const status = computed(() => {
           <strong class="order-ticket__price">{{ formatPrice(order.price) }}</strong>
         </div>
 
-        <el-descriptions :column="3" size="small" class="order-ticket__meta">
+        <el-descriptions :column="1" size="small" class="order-ticket__meta">
           <el-descriptions-item label="订单号">
             <span class="order-ticket__id">{{ order.id }}</span>
           </el-descriptions-item>
-          <el-descriptions-item label="预约时间">
+          <el-descriptions-item label="下单时间">
             {{ formatDateTime(order.createTime) }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="order.status === 0" label="支付截止">
+            {{ formatDateTime(paymentDeadline) }}
           </el-descriptions-item>
           <el-descriptions-item v-if="order.payTime" label="支付时间">
             {{ formatDateTime(order.payTime) }}
@@ -60,10 +74,11 @@ const status = computed(() => {
         </el-tag>
 
         <div v-if="order.status === 0" class="order-ticket__actions">
+          <p v-if="expired" class="order-ticket__expired" role="status">支付已超时，等待关单</p>
           <el-button
             type="primary"
             :loading="loadingAction === 'pay'"
-            :disabled="loadingAction !== null"
+            :disabled="loadingAction !== null || expired"
             @click="emit('pay', order)"
           >
             立即支付
@@ -178,6 +193,12 @@ const status = computed(() => {
 
 .order-ticket__actions :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+
+.order-ticket__expired {
+  grid-column: 1 / -1;
+  color: var(--color-ink-soft);
+  font-size: var(--text-secondary);
 }
 
 @media (max-width: 42rem) {

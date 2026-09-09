@@ -89,19 +89,6 @@ public class AdminAuthTest extends IntegrationTestcontainers {
     }
 
     @Test
-    @DisplayName("普通用户新增票档应返回 403")
-    void testAddTicket_AsNormalUser_ShouldBeForbidden() throws Exception {
-        String token = loginAs(0);
-
-        mockMvc.perform(post("/ticket")
-                        .header("authorization", token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403));
-    }
-
-    @Test
     @DisplayName("未登录创建活动应返回 401，且不被误判成 403")
     void testCreateEvent_WithoutLogin_ShouldBeUnauthorized() throws Exception {
         mockMvc.perform(post("/event")

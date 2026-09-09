@@ -4,12 +4,14 @@ import jakarta.annotation.PostConstruct;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.util.TimeZone;
 
 
 @EnableScheduling
+@EnableFeignClients
 @MapperScan("asia.creat.mapper")
 @SpringBootApplication
 public class Application {

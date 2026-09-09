@@ -1,92 +1,64 @@
-import urllib.request
+import csv
 import json
-import subprocess
 import os
+import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
+
 BENCHMARK_DIR = Path(__file__).resolve().parent
-CSV_FILE = str(BENCHMARK_DIR / "jmeter_tokens.csv")
-USER_COUNT = 100
+BASE_URL = f"http://{os.environ.get('BACKEND_HOST', '127.0.0.1')}:{os.environ.get('BACKEND_HOST_PORT', '8080')}"
+REDIS_CONTAINER = os.environ.get("REDIS_CONTAINER", "ticket-redis")
+CSV_FILE = Path(os.environ.get("TOKEN_FILE", str(BENCHMARK_DIR / "jmeter_tokens.csv")))
 
 
-def load_env():
-    """从仓库根目录的 .env 读取凭据，避免把密码写进脚本。"""
-    env_file = BENCHMARK_DIR.parent / ".env"
-    if not env_file.exists():
-        return
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
-
-
-load_env()
-BACKEND_PORT = os.environ.get("BACKEND_HOST_PORT") or "8080"
-BASE_URL = f"http://localhost:{BACKEND_PORT}"
-REDIS_PASSWORD = os.environ.get("TICKET_REDIS_PASSWORD")
-if not REDIS_PASSWORD:
-    sys.exit("缺少 TICKET_REDIS_PASSWORD，请先在仓库根目录准备 .env（参考 .env.example）")
-REDIS_CONTAINER = "ticket-redis"
-
-print(f">>> 开始生成 {USER_COUNT} 个压测用 Token（Redis 容器：{REDIS_CONTAINER}）...")
-
-tokens = []
-
-for i in range(1, USER_COUNT + 1):
-    phone = f"138{i:08d}"
-    
-    # 1. 发送验证码
-    req = urllib.request.Request(f"{BASE_URL}/user/code?phone={phone}", method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            pass
-    except Exception as e:
-        print(f"发送验证码失败 {phone}: {e}")
-        continue
-    
-    # 2. 从 Redis 提取验证码
-    cmd = ["docker", "exec", REDIS_CONTAINER, "redis-cli", "-a", REDIS_PASSWORD,
-           "--no-auth-warning", "get", f"tc:login:code:{phone}"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    code = res.stdout.strip()
-    # 读不到就跳过，不要回落到硬编码验证码：那样登录必然失败，
-    # 而失败是静默的（返回 200 + data:null），最后会写出一个只有表头的 CSV
-    if not code:
-        print(f"Redis 中没有 {phone} 的验证码，跳过")
-        continue
-
-
-    # 3. 登录
-    login_data = json.dumps({"phone": phone, "code": code}).encode("utf-8")
-    login_req = urllib.request.Request(
-        f"{BASE_URL}/user/login",
-        data=login_data,
+def api(path, data=None):
+    request = urllib.request.Request(
+        BASE_URL + path,
+        data=json.dumps(data).encode("utf-8") if data is not None else None,
         headers={"Content-Type": "application/json"},
-        method="POST"
+        method="POST",
     )
-    try:
-        with urllib.request.urlopen(login_req, timeout=3) as resp:
-            resp_data = json.loads(resp.read().decode("utf-8"))
-            token = resp_data.get("data")
-            if token:
-                tokens.append((token, phone))
-                if i % 25 == 0:
-                    print(f"已生成 {i} / {USER_COUNT} 个 Token...")
-    except Exception as e:
-        print(f"登录失败 {phone}: {e}")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        result = json.load(response)
+    if result.get("code") != 200:
+        raise RuntimeError(result.get("msg", "接口调用失败"))
+    return result.get("data")
 
-# 一个都没拿到就不要覆盖 CSV：写出只有表头的文件会让后续压测全程 401，
-# 而 JMeter 不会因此报错，只会给出一堆无意义的样本
-if not tokens:
-    sys.exit("没有生成任何有效 Token，保留原 CSV 不覆盖。请检查后端与 Redis 状态")
 
-# 写入 CSV (token,phone)
-with open(CSV_FILE, "w", encoding="utf-8") as f:
-    f.write("token,phone\n")
-    for token, phone in tokens:
-        f.write(f"{token},{phone}\n")
+def login(phone):
+    api(f"/user/code?phone={phone}")
+    result = subprocess.run(
+        ["docker", "exec", REDIS_CONTAINER, "sh", "-c",
+         'REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli --raw GET "$1"',
+         "sh", f"tc:login:code:{phone}"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    code = result.stdout.strip()
+    if len(code) != 6 or not code.isdigit():
+        raise RuntimeError(f"未读取到 {phone} 的验证码")
+    token = api("/user/login", {"phone": phone, "code": code})
+    if not isinstance(token, str) or not token:
+        raise RuntimeError(f"{phone} 登录未返回 Token")
+    return token, phone
 
-print(f"完成：已写入 {len(tokens)} 个有效 Token 到 {CSV_FILE}")
+
+def main():
+    count = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+    if count < 1 or count > 100:
+        sys.exit("压测用户数需在 1 到 100 之间")
+
+    tokens = [login(f"138{i:08d}") for i in range(1, count + 1)]
+    CSV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # 全部登录成功后再写入，避免使用不完整的用户集压测。
+    with CSV_FILE.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.writer(output)
+        writer.writerow(("token", "phone"))
+        writer.writerows(tokens)
+    CSV_FILE.chmod(0o600)
+    print(f"已生成 {len(tokens)} 个压测 Token")
+
+
+if __name__ == "__main__":
+    main()

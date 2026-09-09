@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   ArrowLeft,
   CalendarDays,
@@ -7,18 +7,29 @@ import {
   Eye,
   MapPin,
   PenLine,
+  RefreshCw,
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import EventImage from '../components/events/EventImage.vue'
 import TicketOption from '../components/tickets/TicketOption.vue'
 import CheckoutDialog from '../components/orders/CheckoutDialog.vue'
-import { eventApi, orderApi, ticketApi, userApi } from '../services/api'
+import ReservationRecord from '../components/orders/ReservationRecord.vue'
+import { usePolling } from '../composables/usePolling'
+import { eventApi, orderApi, reservationApi, ticketApi, userApi, waitlistApi } from '../services/api'
+import { ApiError } from '../services/http'
 import { useAuthStore } from '../stores/auth'
 import { useNotificationStore } from '../stores/notifications'
 import type { ApiId, EventDetail, Ticket } from '../types/api'
 import { getErrorMessage } from '../utils/errors'
-import { formatCount, formatDateTime, parseBackendDateTime } from '../utils/format'
+import { formatCount, formatDateTime } from '../utils/format'
+import { ticketAvailability } from '../utils/tickets'
 import { splitImages } from '../utils/images'
+import {
+  clearReservationRequest,
+  readReservationRequest,
+  saveReservationRequest,
+  type ReservationRequest,
+} from '../utils/reservations'
 
 // 路由与全局状态
 const route = useRoute()
@@ -35,10 +46,12 @@ const ticketsLoading = ref(true)
 const eventError = ref('')
 const ticketsError = ref('')
 const reservingTicketId = ref<ApiId | null>(null)
-const reservation = ref<{ orderId: ApiId; ticketTitle: string } | null>(null)
 const userCredits = ref(0)
 const checkoutVisible = ref(false)
 const selectedTicket = ref<Ticket | null>(null)
+const checkoutRequest = ref<ReservationRequest | null>(null)
+const checkoutError = ref('')
+const checkoutKind = ref<'reservation' | 'waitlist'>('reservation')
 
 // 页面 UV 浏览去重记录
 const viewedEventIds = new Set<string>()
@@ -50,6 +63,19 @@ const eventId = computed(() => {
   const value = route.params.id
   return Array.isArray(value) ? value[0] || '' : String(value || '')
 })
+
+const reservationId = computed(() => {
+  const value = route.query.reservation
+  return typeof value === 'string' && /^\d+$/.test(value) ? value : null
+})
+const { data: reservation, error: reservationError, refreshing, refresh: refreshReservation } = usePolling(
+  () => auth.token && reservationId.value ? `${auth.token}:${eventId.value}:${reservationId.value}` : null,
+  (signal) => reservationApi.get(reservationId.value!, signal),
+  (result) => result.status === 0 || result.releasePending,
+)
+const reservationErrorMessage = computed(() => (
+  reservationError.value ? getErrorMessage(reservationError.value, '预约结果查询失败') : ''
+))
 
 // 过滤非主图的图集照片
 const galleryImages = computed(() => {
@@ -102,7 +128,11 @@ async function loadDetail() {
 
   event.value = null
   tickets.value = []
-  reservation.value = null
+  checkoutVisible.value = false
+  selectedTicket.value = null
+  checkoutRequest.value = null
+  checkoutError.value = ''
+  reservingTicketId.value = null
   eventLoading.value = true
   ticketsLoading.value = true
   eventError.value = ''
@@ -131,6 +161,7 @@ async function loadDetail() {
 
   if (ticketResult.status === 'fulfilled') {
     tickets.value = ticketResult.value
+    restoreCheckoutRequest()
   } else {
     ticketsError.value = getErrorMessage(ticketResult.reason, '票档信息加载失败')
   }
@@ -150,6 +181,19 @@ async function loadDetail() {
 
   eventLoading.value = false
   ticketsLoading.value = false
+}
+
+function restoreCheckoutRequest() {
+  if (!auth.user || reservingTicketId.value !== null) return
+  for (const ticket of tickets.value) {
+    const saved = readReservationRequest(auth.user.id, ticket.id)
+    if (!saved) continue
+    selectedTicket.value = ticket
+    checkoutRequest.value = saved
+    checkoutKind.value = saved.kind ?? 'reservation'
+    checkoutError.value = '上次提交结果尚未确认'
+    break
+  }
 }
 
 // 重新加载票档
@@ -173,59 +217,103 @@ async function loadTickets() {
   }
 }
 
-// 票档可预约性校验
-function ticketCanBeReserved(ticket: Ticket): boolean {
-  if (ticket.status !== 1 || ticket.stock <= 0) return false
-
-  const now = Date.now()
-  const begin = parseBackendDateTime(ticket.beginTime).getTime()
-  const end = parseBackendDateTime(ticket.endTime).getTime()
-  return Number.isFinite(begin) && Number.isFinite(end) && now >= begin && now <= end
-}
-
 // 打开收银台结算单
-function openCheckout(ticket: Ticket) {
+function openCheckout(ticket: Ticket, kind: 'reservation' | 'waitlist' = 'reservation') {
   if (reservingTicketId.value != null) return
-
-  if (!ticketCanBeReserved(ticket)) {
-    notifications.notify('这个票档当前不可预约，请选择其他票档。', 'error')
-    return
-  }
 
   if (!auth.isAuthenticated) {
     void router.push({ name: 'login', query: { redirect: route.fullPath } })
     return
   }
 
+  if (!auth.user) {
+    notifications.notify('登录信息尚未加载，请稍后重试', 'error')
+    return
+  }
+
+  const saved = readReservationRequest(auth.user.id, ticket.id)
+  if (!saved && ticketAvailability(ticket).kind !== kind) {
+    notifications.notify('票档状态已变化，请刷新票档后重试。', 'error')
+    void loadTickets()
+    return
+  }
+
   selectedTicket.value = ticket
+  checkoutRequest.value = saved
+  checkoutKind.value = saved?.kind ?? (saved ? 'reservation' : kind)
+  checkoutError.value = saved ? '上次提交结果尚未确认' : ''
   checkoutVisible.value = true
 }
 
 // 确认收银台结算
 async function handleCheckoutConfirm(useCreditsChosen: boolean) {
-  if (!selectedTicket.value) return
+  if (!selectedTicket.value || !auth.user || reservingTicketId.value !== null) return
   const ticket = selectedTicket.value
+  const userId = auth.user.id
+  const token = auth.token
+  const context = loadRequestId
   reservingTicketId.value = ticket.id
-  reservation.value = null
+  checkoutError.value = ''
 
   try {
-    const orderId = await orderApi.reserve(ticket.id, useCreditsChosen)
-    reservation.value = { orderId, ticketTitle: ticket.title }
-    checkoutVisible.value = false
-    notifications.notify('预约请求已成功受理，请在 15 分钟内前往票夹完成支付。', 'success')
-    // 扣减后刷新本地积分展示
-    if (auth.user && useCreditsChosen) {
-      const userInfo = await userApi.getInfo(auth.user.id).catch(() => null)
-      if (userInfo) userCredits.value = userInfo.credits ?? 0
+    // 网络异常后继续使用原请求号和积分选项。
+    const request = readReservationRequest(userId, ticket.id) ?? {
+      requestId: crypto.randomUUID(),
+      useCredits: useCreditsChosen,
+      kind: checkoutKind.value,
     }
+    saveReservationRequest(userId, ticket.id, request)
+    checkoutRequest.value = request
+    const id = request.kind === 'waitlist'
+      ? await waitlistApi.join(ticket.id, request.useCredits, request.requestId)
+      : await orderApi.reserve(ticket.id, request.useCredits, request.requestId)
+    if (readReservationRequest(userId, ticket.id)?.requestId === request.requestId) {
+      clearReservationRequest(userId, ticket.id)
+    }
+    if (context !== loadRequestId || token !== auth.token) return
+    checkoutRequest.value = null
+    checkoutVisible.value = false
+    if (request.kind === 'waitlist') {
+      notifications.notify('已加入候补', 'success')
+      await router.push({ path: '/orders', query: { view: 'waitlists' } })
+      return
+    }
+    await router.replace({ query: { ...route.query, reservation: String(id) } })
+    refreshReservation()
+    notifications.notify('预约已受理', 'success')
   } catch (error) {
-    notifications.notify(getErrorMessage(error, '预约失败，请稍后重试'), 'error')
+    if (context !== loadRequestId || token !== auth.token) return
+    if (error instanceof ApiError && error.code >= 400 && error.code < 500) {
+      clearReservationRequest(userId, ticket.id)
+      checkoutRequest.value = null
+      void loadTickets()
+    }
+    checkoutError.value = getErrorMessage(error, '提交结果尚未确认，请重试或查看记录')
   } finally {
-    reservingTicketId.value = null
+    if (context === loadRequestId && token === auth.token) reservingTicketId.value = null
   }
 }
 
 watch(eventId, loadDetail, { immediate: true })
+watch(() => auth.user?.id, restoreCheckoutRequest)
+watch(() => auth.token, () => {
+  checkoutVisible.value = false
+  checkoutRequest.value = null
+  checkoutError.value = ''
+  reservingTicketId.value = null
+})
+watch(() => reservation.value?.status, async (status, previousStatus) => {
+  if (status === undefined || status === 0 || status === previousStatus) return
+  void loadTickets()
+  const userId = auth.user?.id
+  if (!userId) return
+  const userInfo = await userApi.getInfo(userId).catch(() => null)
+  if (auth.user?.id === userId && userInfo) userCredits.value = userInfo.credits ?? 0
+})
+onBeforeUnmount(() => {
+  loadRequestId += 1
+  ticketRequestId += 1
+})
 </script>
 
 <template>
@@ -310,23 +398,32 @@ watch(eventId, loadDetail, { immediate: true })
           </div>
         </div>
 
-        <!-- 预约成功浮层提示 -->
+        <!-- 本次预约结果 -->
+        <div v-if="reservationId && auth.isAuthenticated" class="reservation-result">
+          <div class="reservation-result__heading">
+            <h3 class="section-heading">本次预约</h3>
+            <el-tooltip content="刷新预约结果">
+              <el-button :loading="refreshing" :disabled="refreshing" aria-label="刷新预约结果" @click="refreshReservation">
+                <RefreshCw v-if="!refreshing" :size="18" aria-hidden="true" />
+              </el-button>
+            </el-tooltip>
+          </div>
+          <el-alert v-if="reservationErrorMessage" :title="reservationErrorMessage" type="warning" show-icon :closable="false" />
+          <ReservationRecord v-if="reservation" :reservation="reservation" />
+          <p v-else-if="!reservationErrorMessage" role="status">正在查询预约 {{ reservationId }}</p>
+          <RouterLink :to="{ path: '/orders', query: { view: 'reservations' } }">全部预约记录</RouterLink>
+        </div>
+
         <el-alert
-          v-if="reservation"
-          class="reservation-result"
-          type="success"
+          v-if="checkoutRequest && checkoutError && !checkoutVisible"
+          :title="checkoutError"
+          type="warning"
           show-icon
           :closable="false"
-          role="status"
         >
-          <template #title>
-            <strong>预约请求已成功受理</strong>
-          </template>
-          <p>
-            已锁定 <strong>{{ reservation.ticketTitle }}</strong> 门票，请在 15 分钟内前往票夹完成支付。
-          </p>
-          <RouterLink v-slot="{ navigate }" custom to="/orders">
-            <el-button type="success" @click="navigate">前往票夹查看</el-button>
+          <el-button :loading="reservingTicketId !== null" @click="handleCheckoutConfirm(checkoutRequest.useCredits)">重试提交</el-button>
+          <RouterLink v-slot="{ navigate }" custom :to="{ path: '/orders', query: { view: checkoutKind === 'waitlist' ? 'waitlists' : 'reservations' } }">
+            <el-button @click="navigate">查看记录</el-button>
           </RouterLink>
         </el-alert>
 
@@ -364,6 +461,7 @@ watch(eventId, loadDetail, { immediate: true })
             :ticket="ticket"
             :loading="String(reservingTicketId) === String(ticket.id)"
             @reserve="openCheckout"
+            @waitlist="openCheckout($event, 'waitlist')"
           />
         </div>
 
@@ -374,6 +472,9 @@ watch(eventId, loadDetail, { immediate: true })
           :ticket="selectedTicket"
           :user-credits="userCredits"
           :loading="reservingTicketId !== null"
+          :locked-use-credits="checkoutRequest?.useCredits"
+          :error="checkoutError"
+          :kind="checkoutKind"
           @confirm="handleCheckoutConfirm"
         />
       </section>
@@ -566,17 +667,21 @@ watch(eventId, loadDetail, { immediate: true })
 }
 
 .reservation-result {
-  align-items: flex-start;
-  border-radius: 8px;
+  display: grid;
+  gap: var(--space-3);
+}
 
-  p {
-    color: var(--color-ink-soft);
-    font-size: var(--text-secondary);
-  }
+.reservation-result__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
 
-  .el-button {
-    margin-top: var(--space-3);
-  }
+.reservation-result__heading :deep(.el-button) {
+  width: 44px;
+  height: 44px;
+  padding: 0;
 }
 
 .event-intro {

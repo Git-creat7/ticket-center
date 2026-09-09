@@ -128,6 +128,7 @@ export interface Ticket {
   type: number
   status: number
   stock: number
+  hasWaitlist?: boolean
   beginTime: BackendDateTime
   endTime: BackendDateTime
 }
@@ -147,6 +148,39 @@ export interface TicketOrder {
   statusDesc: string
   createTime: BackendDateTime
   payTime: BackendDateTime | null
+}
+
+export type ReservationStatus = 0 | 1 | 2 | 3
+
+export interface TicketReservation {
+  id: ApiId
+  ticketId: ApiId
+  ticketTitle: string
+  orderId: ApiId | null
+  status: ReservationStatus
+  statusDesc: string
+  failureReason: string | null
+  releasePending: boolean
+  orderStatus: OrderStatus | null
+  paymentDeadline: BackendDateTime | null
+  createTime: BackendDateTime
+}
+
+export interface TicketWaitlist {
+  id: ApiId
+  ticketId: ApiId
+  ticketTitle: string
+  status: 0 | 1 | 2 | 3 | 4
+  statusDesc: string
+  position: number | null
+  price: number
+  useCredits: boolean
+  failureReason: string | null
+  reservationId: ApiId | null
+  orderId: ApiId | null
+  orderStatus: OrderStatus | null
+  paymentDeadline: BackendDateTime | null
+  createTime: BackendDateTime
 }
 
 export interface EventReview {

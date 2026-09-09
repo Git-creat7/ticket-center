@@ -20,6 +20,8 @@ import type {
   SignStatus,
   Ticket,
   TicketOrder,
+  TicketReservation,
+  TicketWaitlist,
   User,
   UserInfo,
 } from '../types/api'
@@ -94,10 +96,10 @@ export const ticketApi = {
 }
 
 export const orderApi = {
-  reserve: (ticketId: ApiId, useCredits?: boolean) => apiRequest<ApiId>({
+  reserve: (ticketId: ApiId, useCredits?: boolean, requestId?: string) => apiRequest<ApiId>({
     method: 'POST',
     url: `/ticket-orders/reserve/${ticketId}`,
-    params: useCredits ? { useCredits: true } : undefined,
+    params: { ...(useCredits ? { useCredits: true } : {}), ...(requestId ? { requestId } : {}) },
   }),
   pay: (orderId: ApiId) => apiRequest<void>({
     method: 'POST',
@@ -111,6 +113,35 @@ export const orderApi = {
     method: 'GET',
     url: '/ticket-orders/me',
     params,
+  }),
+}
+
+export const reservationApi = {
+  get: (id: ApiId, signal?: AbortSignal) => apiRequest<TicketReservation>({
+    method: 'GET',
+    url: `/ticket-reservations/${id}`,
+    signal,
+  }),
+  mine: (params: PageQuery = {}, signal?: AbortSignal) => apiRequest<PageResult<TicketReservation>>({
+    method: 'GET',
+    url: '/ticket-reservations/me',
+    params,
+    signal,
+  }),
+}
+
+export const waitlistApi = {
+  join: (ticketId: ApiId, useCredits: boolean, requestId: string) => apiRequest<ApiId>({
+    method: 'POST',
+    url: `/ticket-waitlists/join/${ticketId}`,
+    params: { useCredits, requestId },
+  }),
+  cancel: (id: ApiId) => apiRequest<void>({ method: 'POST', url: `/ticket-waitlists/cancel/${id}` }),
+  mine: (params: PageQuery = {}, signal?: AbortSignal) => apiRequest<PageResult<TicketWaitlist>>({
+    method: 'GET',
+    url: '/ticket-waitlists/me',
+    params,
+    signal,
   }),
 }
 

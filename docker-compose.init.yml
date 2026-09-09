@@ -1,0 +1,32 @@
+services:
+  mysql-init:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:?请先在 .env 中设置 DB_PASSWORD}"
+      DB_PASSWORD: "${DB_PASSWORD:?请先在 .env 中设置 DB_PASSWORD}"
+      DB_USERNAME: "${DB_USERNAME:-ticket_core}"
+      ORDER_DB_USERNAME: "${ORDER_DB_USERNAME:-ticket_order}"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+    volumes:
+      - ./deploy/mysql/init-users.sh:/scripts/init-users.sh:ro
+    command: ["bash", "/scripts/init-users.sh"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  nacos-init:
+    image: curlimages/curl:8.10.1
+    environment:
+      NACOS_SERVER_ADDR: http://nacos:8848
+      NACOS_GROUP: TICKET_CENTER
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
+    volumes:
+      - ./deploy/nacos:/configs:ro
+      - ./deploy/nacos/init.sh:/scripts/init.sh:ro
+    command: ["sh", "/scripts/init.sh"]
+    depends_on:
+      nacos:
+        condition: service_healthy
+    restart: "no"

@@ -40,6 +40,7 @@ public class UserInfo implements Serializable {
 
     private LocalDate birthday;
 
+    @TableField(exist = false)
     private Integer credits;
 
     private LocalDateTime createTime;

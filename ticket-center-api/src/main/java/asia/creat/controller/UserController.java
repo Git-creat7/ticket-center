@@ -1,20 +1,15 @@
 package asia.creat.controller;
 
-import asia.creat.common.PageResult;
+import asia.creat.client.OrderClient;
 import asia.creat.common.Result;
-import asia.creat.dto.PageQuery;
 import asia.creat.dto.PasswordLoginDTO;
 import asia.creat.dto.SetPasswordDTO;
 import asia.creat.dto.UserLoginDTO;
 import asia.creat.dto.UserProfileUpdateDTO;
-import asia.creat.entity.CreditLog;
 import asia.creat.entity.UserInfo;
-import asia.creat.service.CreditLogService;
 import asia.creat.service.FollowService;
-import asia.creat.service.SignService;
 import asia.creat.service.UserInfoService;
 import asia.creat.service.UserService;
-import asia.creat.utils.UserHolder;
 import asia.creat.vo.UserVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
@@ -34,9 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
-    private final SignService signService;
     private final UserInfoService userInfoService;
-    private final CreditLogService creditLogService;
+    private final OrderClient orderClient;
     private final FollowService followService;
 
     @PostMapping("/code")
@@ -86,13 +80,14 @@ public class UserController {
     public Result info(@PathVariable("id") Long userId) {
         UserInfo info = userInfoService.getById(userId);
         if (info == null) {
-            info = new UserInfo().setUserId(userId).setCredits(0);
+            info = new UserInfo().setUserId(userId);
         } else {
             info.setCreateTime(null);
             info.setUpdateTime(null);
         }
         info.setFollowee(followService.countFollowee(userId));
         info.setFans(followService.countFans(userId));
+        info.setCredits(orderClient.getCredits(userId));
         return Result.success(info);
     }
 
@@ -100,24 +95,6 @@ public class UserController {
     public Result queryUserById(@PathVariable("id") Long userId) {
         UserVO user = userService.queryUserById(userId);
         return Result.success(user);
-    }
-
-    @PostMapping("/sign")
-    public Result sign() {
-        signService.sign();
-        return Result.success();
-    }
-
-    @GetMapping("/sign/status")
-    public Result getSignStatus() {
-        return Result.success(signService.getSignStatus());
-    }
-
-    @GetMapping("/credits/logs")
-    public Result creditLogs(@Validated PageQuery query) {
-        Long userId = UserHolder.getUser().getId();
-        PageResult<CreditLog> result = creditLogService.queryUserCreditLogs(userId, query);
-        return Result.success(result);
     }
 
     @PutMapping("/profile")

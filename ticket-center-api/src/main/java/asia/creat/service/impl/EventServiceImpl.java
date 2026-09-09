@@ -1,5 +1,6 @@
 package asia.creat.service.impl;
 
+import asia.creat.client.OrderClient;
 import asia.creat.common.exception.BusinessException;
 import asia.creat.dto.EventCreateDTO;
 import asia.creat.dto.EventQueryDTO;
@@ -8,16 +9,13 @@ import asia.creat.dto.NearbyEventQueryDTO;
 import asia.creat.dto.PageQuery;
 import asia.creat.entity.Event;
 import asia.creat.entity.EventCategory;
-import asia.creat.entity.Ticket;
 import asia.creat.mapper.EventMapper;
-import asia.creat.mapper.TicketMapper;
 import asia.creat.service.EventCategoryService;
 import asia.creat.service.EventService;
 import asia.creat.utils.CacheClient;
 import asia.creat.utils.UserHolder;
 import asia.creat.vo.EventDetailVO;
 import asia.creat.vo.EventListItemVO;
-import asia.creat.vo.TicketVO;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -60,7 +58,7 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     private final CacheClient cacheClient;
     private final StringRedisTemplate stringRedisTemplate;
     private final EventCategoryService eventCategoryService;
-    private final TicketMapper ticketMapper;
+    private final OrderClient orderClient;
 
     @Override
     public EventDetailVO queryById(Long id) {
@@ -70,6 +68,8 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         if (vo == null) {
             throw new BusinessException(404, "演出不存在");
         }
+        // 库存和候补状态由订单服务实时返回，不放进活动缓存。
+        vo.setTickets(orderClient.queryTickets(id));
         return vo;
     }
 
@@ -83,12 +83,6 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
 
         // 关联分类名称：走带缓存的分类全量表，见 categoryNameMap()
         vo.setCategoryName(categoryNameMap().get(event.getCategoryId()));
-
-        // 关联票档列表
-        List<Ticket> tickets = ticketMapper.queryTicketOfEvent(id);
-        if (tickets != null && !tickets.isEmpty()) {
-            vo.setTickets(tickets.stream().map(t -> BeanUtil.copyProperties(t, TicketVO.class)).toList());
-        }
 
         return vo;
     }

@@ -8,18 +8,18 @@
     </TestPlan>
     <hashTree>
       <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Seckill Threads">
-        <intProp name="ThreadGroup.num_threads">100</intProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(threads,100)}</stringProp>
         <intProp name="ThreadGroup.ramp_time">1</intProp>
         <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
         <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
-          <stringProp name="LoopController.loops">10</stringProp>
+          <stringProp name="LoopController.loops">${__P(loops,10)}</stringProp>
           <boolProp name="LoopController.continue_forever">false</boolProp>
         </elementProp>
       </ThreadGroup>
       <hashTree>
         <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="CSV Tokens">
-          <stringProp name="filename">jmeter_tokens.csv</stringProp>
+          <stringProp name="filename">${__P(token_file,jmeter_tokens.csv)}</stringProp>
           <stringProp name="fileEncoding">UTF-8</stringProp>
           <stringProp name="variableNames">token,phone</stringProp>
           <boolProp name="ignoreFirstLine">true</boolProp>
@@ -43,11 +43,13 @@
           </collectionProp>
         </HeaderManager>
         <hashTree/>
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /ticket-orders/reserve/3">
-          <stringProp name="HTTPSampler.domain">localhost</stringProp>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /ticket-orders/reserve/{ticketId}">
+          <stringProp name="HTTPSampler.domain">${__P(backend_host,127.0.0.1)}</stringProp>
           <stringProp name="HTTPSampler.port">${__P(backend_port,8080)}</stringProp>
           <stringProp name="HTTPSampler.protocol">http</stringProp>
-          <stringProp name="HTTPSampler.path">/ticket-orders/reserve/3</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">5000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">10000</stringProp>
+          <stringProp name="HTTPSampler.path">/ticket-orders/reserve/${__P(ticket_id,0)}</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
           <stringProp name="HTTPSampler.method">POST</stringProp>
           <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
@@ -62,7 +64,25 @@
             </collectionProp>
           </elementProp>
         </HTTPSamplerProxy>
-        <hashTree/>
+        <hashTree>
+          <JSR223Assertion guiclass="TestBeanGUI" testclass="JSR223Assertion" testname="Check reservation result">
+            <stringProp name="scriptLanguage">groovy</stringProp>
+            <stringProp name="cacheKey">true</stringProp>
+            <stringProp name="script"><![CDATA[
+vars.put('reservation_id', '')
+def result = new groovy.json.JsonSlurper().parseText(prev.getResponseDataAsString())
+boolean accepted = result.code == 200 && result.data?.toString() ==~ /[0-9]+/
+boolean duplicate = result.code == 500 && result.msg == '已有有效预约，请查看预约记录'
+if (prev.getResponseCode() != '200' || (!accepted && !duplicate)) {
+    AssertionResult.setFailure(true)
+    AssertionResult.setFailureMessage('Reservation failed: ' + result.msg)
+} else if (accepted) {
+    vars.put('reservation_id', result.data.toString())
+}
+]]></stringProp>
+          </JSR223Assertion>
+          <hashTree/>
+        </hashTree>
       </hashTree>
     </hashTree>
   </hashTree>

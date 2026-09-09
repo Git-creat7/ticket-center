@@ -1,0 +1,13 @@
+.git
+.gstack
+.env
+.env.*
+**/application-local.yaml
+**/application-local.yml
+**/target
+**/node_modules
+**/uploads
+ticket-center-web
+benchmark
+data
+*.log
