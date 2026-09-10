@@ -2,7 +2,7 @@
 
 ## 1. 环境准备
 
-线上服务器只需要 Docker、三份 Compose、`deploy/` 目录和 `.env`，不需要 Java 源码、前端源码或 Dockerfile。首次部署前准备 Docker Compose v2，并确保服务器可以访问 GHCR。
+单机部署只需要 Docker、三份 Compose、`deploy/` 目录和 `.env`，不需要 Java 源码、前端源码或 Dockerfile。首次部署前准备 Docker Compose v2，并确保服务器可以访问 GHCR。多服务器应用部署见第 9 节，应用节点不需要中间件和初始化文件。
 
 复制环境变量模板：
 
@@ -66,7 +66,7 @@ docker compose \
 | 文件 | 内容 |
 | :--- | :--- |
 | `docker-compose.middleware.yml` | MySQL、Redis、RabbitMQ、Nacos |
-| `docker-compose.init.yml` | MySQL 业务账号和 Nacos 配置的一次性初始化容器 |
+| `docker-compose.init.yml` | MySQL 建库建表、业务账号和 Nacos 配置的初始化容器 |
 | `docker-compose.app.yml` | `ticket-center-api`、`order-service`、Gateway 和前端镜像 |
 
 `mysql-init` 和 `nacos-init` 成功后显示 `Exited (0)` 是正常状态。再次执行只会同步账号权限或检查已有配置，不会删除数据库和 Nacos 配置。
@@ -86,14 +86,14 @@ ghcr.io/<owner>/<repo>/ticket-web:<tag>
 
 ## 4. 数据库与初始化
 
-MySQL 第一次创建数据卷时，会由官方镜像执行：
+建库建表与业务账号都由 `mysql-init` 容器完成，每次 `up` 都会执行，按库幂等：
 
-- `deploy/mysql/01-ticket.sql`：`ticket_center` 库
-- `deploy/mysql/02-order.sql`：`ticket_order` 库
+- `deploy/mysql/01-ticket.sql`：`ticket_center` 库，库已存在则整文件跳过
+- `deploy/mysql/02-order.sql`：`ticket_order` 库，库已存在则整文件跳过
 
-`mysql-init` 使用 `DB_USERNAME`、`ORDER_DB_USERNAME` 和 `DB_PASSWORD` 创建业务账号，并分别授权两个数据库。业务服务不使用 root 账号。
+之后使用 `DB_USERNAME`、`ORDER_DB_USERNAME` 和 `DB_PASSWORD` 创建业务账号，并分别授权两个数据库。业务服务不使用 root 账号。
 
-MySQL 官方镜像只会在空数据目录执行初始化 SQL。已有数据卷不会因为重启自动更新表结构；需要变更时先备份，再按项目约定重新初始化或执行经过验证的 SQL。不要直接把旧单体数据卷当作新微服务数据使用。
+因此从旧单体版本升级时，已有数据卷里缺少的 `ticket_order` 库会在下一次 `up` 时自动补建；`ticket_center` 库保留原数据。两份 SQL 含裸 `CREATE TABLE` 与种子数据，不能对已存在的库重复执行，已有库的表结构变更要先备份，再执行经过验证的迁移 SQL。
 
 ## 5. Nacos 配置
 
@@ -179,3 +179,54 @@ docker compose \
   -f docker-compose.app.yml \
   --profile full config --images
 ```
+
+## 9. 多服务器部署
+
+`docker-compose.app-prod.yml` 是独立的应用编排，不含 `depends_on`、固定容器名或源码构建，也不启动中间件。每台应用服务器运行一套前端、Gateway、`ticket-center-api` 和 `order-service`，连接同一组 MySQL、Redis、RabbitMQ 和 Nacos。入口负载均衡需单独配置，把请求分发到两台前端（5173）；直接调用 API 时分发到两台 Gateway（8080）。
+
+以下以中间件服务器 `10.0.0.10`、应用节点 A `10.0.0.21` 和 B `10.0.0.22` 为例。中间件仍可单节点用于多实例演示，但不代表生产高可用；本仓库尚未完成真实多服务器联调。
+
+### 中间件准备
+
+先完成两个数据库、业务账号、RabbitMQ 用户和 Nacos 配置的初始化，再启动应用。可以在中间件服务器沿用 `docker-compose.middleware.yml` 与 `docker-compose.init.yml`；托管服务则按第 4、5 节准备数据库和配置。应用使用各自的业务数据库账号，不使用 root。
+
+沿用仓库的中间件编排时，在该服务器 `.env` 设置 `NACOS_BIND_IP=10.0.0.10`，让 Nacos 的 HTTP 和 gRPC 端口绑定私网；不设置时仍为 `127.0.0.1`，其他服务器无法访问。只向应用节点开放 MySQL 3306、Redis 6379、RabbitMQ 5672、Nacos 8848/9848。Nacos gRPC 端口必须是 HTTP 端口加 1000。实际生产还需要开启 Nacos 鉴权，不能将默认未鉴权的控制台暴露到公网。
+
+### 每台应用节点配置
+
+应用节点只需 `docker-compose.app-prod.yml` 和根据 `.env.example` 填写的 `.env`。保留数据库、Redis、RabbitMQ、内部调用凭据及镜像设置，并取消模板末尾所需变量的注释。节点 A 的地址配置示例：
+
+```env
+DB_URL=jdbc:mysql://10.0.0.10:3306/ticket_center?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+ORDER_DB_URL=jdbc:mysql://10.0.0.10:3306/ticket_order?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+TICKET_REDIS_HOST=10.0.0.10
+TICKET_REDIS_PORT=6379
+TICKET_RABBITMQ_HOST=10.0.0.10
+TICKET_RABBITMQ_PORT=5672
+NACOS_SERVER_ADDR=10.0.0.10:8848
+NACOS_DISCOVERY_IP=10.0.0.21
+GATEWAY_URL=http://10.0.0.21:8080
+```
+
+节点 B 将 `NACOS_DISCOVERY_IP` 改为 `10.0.0.22`，`GATEWAY_URL` 改为 `http://10.0.0.22:8080`。这些是示例地址，部署时填写实际值。所有节点必须使用相同的 Redis、交易数据库、RabbitMQ vhost、`TICKET_INTERNAL_TOKEN` 和 Nacos namespace；开启 Nacos 鉴权后还要设置 `NACOS_USERNAME`、`NACOS_PASSWORD`。`ORDER_DB_PASSWORD` 未设置时沿用 `DB_PASSWORD`。
+
+- `NACOS_DISCOVERY_IP` 通过 `SPRING_CLOUD_NACOS_DISCOVERY_IP` 映射到 `spring.cloud.nacos.discovery.ip`，必须是当前宿主机的私网 IPv4 地址，不能用容器 IP、`localhost` 或 `0.0.0.0`。不要把这个每节点不同的值写入 Nacos 的共享配置。
+- API 与订单服务的端口只绑定该私网 IP。修改 `CORE_HOST_PORT`、`ORDER_HOST_PORT`、`BACKEND_HOST_PORT` 时，编排会同步设置 `spring.cloud.nacos.discovery.port`，注册宿主机端口而非容器端口；健康检查仍访问容器内的 9082、9083、9080，不对外映射管理端口。
+- 每台应用节点的容器必须能访问所有节点的注册 IP/端口，包括自己宿主机的私网地址。安全组、防火墙只对应用节点放行业务端口，前端/Gateway 入口只对负载均衡或必要的访问来源开放。
+- `GATEWAY_URL` 是前端容器代理使用的 Gateway 地址，不是浏览器的 API 地址；浏览器仍请求同源的 `/api`。可使用本节点私网 Gateway 或独立的 Gateway 负载均衡地址。不要设置直连业务实例的 `TICKET_API_URL`、`ORDER_SERVICE_URL`，否则会绕过服务发现。
+- 多台 API 必须启用同一个 OSS Bucket（`TICKET_OSS_ENABLED=true`，填写 AccessKey 等配置），或将 `/app/uploads` 改挂同一共享文件系统。默认 `backend-uploads` 只保存在单台机器，不能跨节点共享；已有本地上传文件需单独迁移。
+
+### 启动与验收
+
+在每台应用节点执行，不与单机三份 Compose 合并，也不需要 `--profile full`：
+
+```bash
+docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml config --quiet
+docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml pull
+docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml up -d
+docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml ps
+```
+
+没有 `depends_on` 不代表自动等待外部中间件就绪。启动失败时先看 `docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml logs --tail 100`；`restart: unless-stopped` 只在进程退出时重启，不会因 healthcheck 变成 unhealthy 自动重启。固定端口映射适合每台主机各一套，不要直接 `--scale`；同主机另起一套时需更换项目名和全部宿主机端口。
+
+验收时应在 Nacos 的同一 namespace、`TICKET_CENTER` 分组中看到每个 Java 服务各两个健康实例，例如 API 的 `10.0.0.21:8082` 和 `10.0.0.22:8082`。分别经两台 Gateway 验证活动和票档查询、共享登录态、预约到支付/取消链路及图片访问，再通过负载均衡复测。最后在测试环境停止一台应用节点，检查入口摘除、Nacos 实例摘除及剩余节点能否继续处理请求；这些结果通过前不要宣称多机容错已验收。

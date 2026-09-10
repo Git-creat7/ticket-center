@@ -71,7 +71,7 @@ const reservationId = computed(() => {
 const { data: reservation, error: reservationError, refreshing, refresh: refreshReservation } = usePolling(
   () => auth.token && reservationId.value ? `${auth.token}:${eventId.value}:${reservationId.value}` : null,
   (signal) => reservationApi.get(reservationId.value!, signal),
-  (result) => result.status === 0 || result.releasePending,
+  (result) => result.status === 0 || result.releasePending || result.orderStatus === 0,
 )
 const reservationErrorMessage = computed(() => (
   reservationError.value ? getErrorMessage(reservationError.value, '预约结果查询失败') : ''
@@ -302,8 +302,9 @@ watch(() => auth.token, () => {
   checkoutError.value = ''
   reservingTicketId.value = null
 })
-watch(() => reservation.value?.status, async (status, previousStatus) => {
-  if (status === undefined || status === 0 || status === previousStatus) return
+watch(() => [reservation.value?.status, reservation.value?.orderStatus, reservation.value?.releasePending], async (state, previousState) => {
+  if (state[0] === undefined || state[0] === 0
+    || state.every((value, index) => value === previousState[index])) return
   void loadTickets()
   const userId = auth.user?.id
   if (!userId) return
@@ -384,7 +385,7 @@ onBeforeUnmount(() => {
 
           <p class="event-interest">
             <Eye :size="18" aria-hidden="true" />
-            <span>{{ formatCount(uv) }} 人关注浏览</span>
+            <span>{{ formatCount(uv) }} 人浏览过</span>
           </p>
         </div>
       </article>

@@ -10,6 +10,8 @@ services:
       MYSQL_PORT: 3306
     volumes:
       - ./deploy/mysql/init-users.sh:/scripts/init-users.sh:ro
+      - ./deploy/mysql/01-ticket.sql:/schema/01-ticket.sql:ro
+      - ./deploy/mysql/02-order.sql:/schema/02-order.sql:ro
     command: ["bash", "/scripts/init-users.sh"]
     depends_on:
       mysql:

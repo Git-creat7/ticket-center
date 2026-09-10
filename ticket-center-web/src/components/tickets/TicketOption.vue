@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { Clock3, Flame, Ticket as TicketIcon } from 'lucide-vue-next'
 import type { Ticket } from '../../types/api'
 import { formatDateTime, formatPrice } from '../../utils/format'
@@ -18,7 +18,11 @@ const emit = defineEmits<{
   waitlist: [ticket: Ticket]
 }>()
 
-const availability = computed(() => ticketAvailability(props.ticket))
+const now = ref(Date.now())
+const clock = setInterval(() => { now.value = Date.now() }, 1000)
+onBeforeUnmount(() => clearInterval(clock))
+
+const availability = computed(() => ticketAvailability(props.ticket, now.value))
 
 const availabilityType = computed<'success' | 'warning' | 'info'>(() => {
   if (availability.value.kind === 'reservation') return 'success'

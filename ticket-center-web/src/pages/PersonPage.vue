@@ -220,7 +220,7 @@ watch(userId, load, { immediate: true })
             aria-label="查看粉丝列表"
             @click="openFollowList('fans')"
           >
-            <el-statistic title="关注者" :value="info.fans ?? 0" />
+            <el-statistic title="粉丝" :value="info.fans ?? 0" />
           </button>
           <div class="person-stat-static">
             <el-statistic title="积分" :value="info.credits ?? 0" />

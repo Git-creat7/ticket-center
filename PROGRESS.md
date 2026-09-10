@@ -4,9 +4,9 @@
 
 ## 当前位置
 
-**日期**：2026-08-30
-**状态**：功能已闭环，进入优化与交付打磨阶段。全量 `mvn test` 52 项全绿（1 项按日期 skip）。
-**仓库**：后端 `ticket-center-api/`、前端 `ticket-center-web/`、压测 `benchmark/` 三模块共仓。
+**日期**：2026-09-09
+**状态**：已完成微服务拆分并提交（commit `55ef5347`），进入交付验证阶段。CI 全绿：后端三模块 `mvn test` 共 116 个用例（Testcontainers 起 MySQL/Redis/RabbitMQ），前端 `npm run build` + `npm test`，四个镜像推送 GHCR。正在做干净环境的部署验证。
+**仓库**：Maven 多模块父工程。`ticket-gateway/` 统一入口（Spring Cloud Gateway + Nacos 注册发现）、`ticket-center-api/` 用户/活动/社区服务（`ticket_center` 库）、`order-service/` 票档/库存/预约/候补/订单/签到/积分服务（`ticket_order` 库 + RabbitMQ）、`ticket-common/` 通用响应/会话校验/跨服务 DTO、前端 `ticket-center-web/`、压测 `benchmark/`。部署拆成 `docker-compose.middleware.yml` / `init.yml` / `app.yml` 三份，线上只拉镜像不构建。
 
 ## 已完成
 
@@ -23,6 +23,7 @@
 - [x] 目录重构：后端迁入 `ticket-center-api/` 完成前后端分仓（commit `3d5d4be`）
 - [x] 交付加固：压测脚本去硬编码、凭据外置、运行时产物纳入 gitignore
 - [x] 一致性优化四项（见下方"优化记录"）
+- [x] 微服务拆分：单体拆为 gateway + ticket-center-api + order-service，两个业务服务分库、经 OpenFeign 内部接口互调、共用 Redis 登录态；Nacos 承担注册发现与配置中心；Compose 拆成中间件/初始化/应用三份，CI 构建镜像推 GHCR（commit `55ef5347`）
 
 ## 待办
 
@@ -226,6 +227,11 @@
 - **记忆点 4**：**修 N+1 之前先找一遍现成的批量/缓存入口。** 这次的字典表已经有一个带 Redis 缓存的 `queryCategoryList()` 摆在那儿，照惯例写 `selectBatchIds` 反而是多造一套。**"该用什么方案"要在读完同层已有代码之后再定。**
 - **记忆点 5**：**`git stash` 是做性能前后对比最省事的办法。** 改动留在工作区，stash 一次跑 before、pop 回来跑 after，同一套用例同一套数据。判断口径要盯"其余各表次数是否完全不变"——只有那样才说明差异来自被改的那一处，而不是测试本身跑了不同的路径。
 
+### 17. 容器order-service部署失败
+- `✘ Container order-service              Error dependency order-service failed to start`
+- 查找日志后发现是 **未执行**
+
+
 ## 其余已定位未修项
 
 > 本节原有 5 项已在 P0/P1/P2 修复轮中处理（权限模型、成交价冻结、匿名 UV 刷量、库存预热不恢复资格 Set、验证码限流、fans/followee 不更新），详见优化记录 13。
@@ -235,66 +241,4 @@
   - `EventReviewServiceImpl.toReviewVO()` 已改为 `toReviewVOList` 批量组装，作者一次 `listByIds`、点赞状态一次 pipeline（见优化记录 15）。
 
 
-## 已知边界
 
-- 支付仅为订单状态流转，未接入真实支付平台。
-- 验证码只写入 Redis，未接入短信服务。
-- MySQL 与 Redis 之间无分布式事务，依靠 Lua 原子性、状态机 CAS 与死信补偿降低不一致窗口。
-- 存量订单的 `used_credits` 为 0，即迁移前的老订单取消时不退积分。
-
-## 迁移注意
-
-Redis key 格式变更后，旧的 `tc:ticket:stock:*` / `tc:ticket:order:*` 会成为孤儿键，且**旧的一人一票记录全部失效**——迁移窗口内已购票用户可再抢一张。重启后 `TicketStockCacheInitializer` 会按新格式重新预热库存，旧键需手动清理。
-
-已有数据库需补列（`ticket.sql` 已含该列，新建库无需执行）：
-
-```sql
-ALTER TABLE tb_ticket_order
-  ADD COLUMN used_credits int NOT NULL DEFAULT 0 COMMENT '下单实际抵扣积分(分)' AFTER price;
-```
-
-一人一票的数据库兜底索引（同样已写入 `ticket.sql`，仅老库需补）：
-
-```sql
-ALTER TABLE tb_ticket_order
-  ADD COLUMN active_flag tinyint
-    GENERATED ALWAYS AS (CASE WHEN status IN (0,1) THEN 1 ELSE NULL END) VIRTUAL
-    COMMENT '活跃订单标记，仅供唯一索引使用' AFTER status,
-  ADD UNIQUE KEY uk_user_ticket_active (user_id, ticket_id, active_flag);
-```
-
-执行前先确认存量数据不冲突，有输出则需先人工处理重复的活跃订单：
-
-```sql
-SELECT user_id, ticket_id, COUNT(*) FROM tb_ticket_order
- WHERE status IN (0,1) GROUP BY user_id, ticket_id HAVING COUNT(*) > 1;
-```
-
-管理员角色列（同样已写入 `ticket.sql`，仅老库需补）：
-
-```sql
-ALTER TABLE tb_user
-  ADD COLUMN role tinyint NOT NULL DEFAULT 0 COMMENT '角色：0普通用户 1管理员' AFTER icon;
-```
-
-注册接口不接受 role 参数，`createUserWithPhone` 只写 phone 与 nick_name，提权只能手工执行：
-
-```sql
-UPDATE tb_user SET role = 1 WHERE phone = '13800000000';
-```
-
-热门排序索引（同样已写入 `ticket.sql`，仅老库需补，见优化记录 15）。`hot`/`liked`/`id` 必须写 `DESC`——升序索引只能倒读单列，两列都倒序就要 filesort：
-
-```sql
-ALTER TABLE tb_event
-  ADD KEY idx_status_hot_id (status, hot DESC, id DESC),
-  ADD KEY idx_category_status_hot_id (category_id, status, hot DESC, id DESC),
-  DROP KEY idx_category;
-
-ALTER TABLE tb_event_review
-  ADD KEY idx_liked_id (liked DESC, id DESC);
-```
-
-`DROP KEY idx_category` 是因为 `idx_category_status_hot_id` 的最左前缀已经覆盖它，留着只是白占写入开销。执行后跑一次 `ANALYZE TABLE tb_event, tb_event_review` 刷新统计信息，否则优化器可能仍按旧基数选错计划。
-
-`RedisIdWorker` 的时区修复（优化记录 15）会让**新生成的 ID 比修复前小 28800**（少了 8 小时的偏移）。这个库里现有最大订单 ID 对应的时刻比修复时点早 36.9 小时，远大于 8 小时，所以新 ID 仍然大于所有存量 ID，不会撞号也不破坏单调。**但如果某个环境是在修复前 8 小时内刚生成过订单，回拨会造成 ID 重叠**，迁移前用 `SELECT MAX(id) FROM tb_ticket_order` 反解一下时间戳段确认。

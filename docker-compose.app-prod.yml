@@ -1,0 +1,98 @@
+services:
+  ticket-center-api:
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-center-api:${TICKET_IMAGE_TAG:-latest}"
+    ports:
+      - "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}:${CORE_HOST_PORT:-8082}:8082"
+    environment:
+      DB_URL: "${DB_URL:?请设置 DB_URL}"
+      DB_USERNAME: "${DB_USERNAME:-ticket_core}"
+      DB_PASSWORD: "${DB_PASSWORD:?请设置 DB_PASSWORD}"
+      TICKET_REDIS_HOST: "${TICKET_REDIS_HOST:?请设置 TICKET_REDIS_HOST}"
+      TICKET_REDIS_PORT: "${TICKET_REDIS_PORT:-6379}"
+      TICKET_REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?请设置 TICKET_REDIS_PASSWORD}"
+      TICKET_INTERNAL_TOKEN: "${TICKET_INTERNAL_TOKEN:?请设置 TICKET_INTERNAL_TOKEN}"
+      NACOS_SERVER_ADDR: "${NACOS_SERVER_ADDR:?请设置 NACOS_SERVER_ADDR}"
+      NACOS_USERNAME: "${NACOS_USERNAME:-}"
+      NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}"
+      SPRING_CLOUD_NACOS_DISCOVERY_PORT: "${CORE_HOST_PORT:-8082}"
+      SPRING_PROFILES_ACTIVE: cloud
+      TICKET_OSS_ENABLED: "${TICKET_OSS_ENABLED:-false}"
+      TICKET_OSS_ENDPOINT: "${TICKET_OSS_ENDPOINT:-https://oss-cn-beijing.aliyuncs.com}"
+      TICKET_OSS_BUCKET: "${TICKET_OSS_BUCKET:-}"
+      TICKET_OSS_PUBLIC_DOMAIN: "${TICKET_OSS_PUBLIC_DOMAIN:-}"
+      TICKET_OSS_OBJECT_PREFIX: "${TICKET_OSS_OBJECT_PREFIX:-uploads}"
+      OSS_ACCESS_KEY_ID: "${OSS_ACCESS_KEY_ID:-}"
+      OSS_ACCESS_KEY_SECRET: "${OSS_ACCESS_KEY_SECRET:-}"
+      TICKET_OSS_SECURITY_TOKEN: "${TICKET_OSS_SECURITY_TOKEN:-${ALIBABA_CLOUD_SECURITY_TOKEN:-}}"
+      TICKET_OSS_CLI_PROFILE: "${TICKET_OSS_CLI_PROFILE:-}"
+    volumes:
+      - backend-uploads:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  order-service:
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/order-service:${TICKET_IMAGE_TAG:-latest}"
+    ports:
+      - "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}:${ORDER_HOST_PORT:-8083}:8083"
+    environment:
+      ORDER_DB_URL: "${ORDER_DB_URL:?请设置 ORDER_DB_URL}"
+      ORDER_DB_USERNAME: "${ORDER_DB_USERNAME:-ticket_order}"
+      ORDER_DB_PASSWORD: "${ORDER_DB_PASSWORD:-${DB_PASSWORD:?请设置 DB_PASSWORD}}"
+      TICKET_REDIS_HOST: "${TICKET_REDIS_HOST:?请设置 TICKET_REDIS_HOST}"
+      TICKET_REDIS_PORT: "${TICKET_REDIS_PORT:-6379}"
+      TICKET_REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?请设置 TICKET_REDIS_PASSWORD}"
+      TICKET_RABBITMQ_HOST: "${TICKET_RABBITMQ_HOST:?请设置 TICKET_RABBITMQ_HOST}"
+      TICKET_RABBITMQ_PORT: "${TICKET_RABBITMQ_PORT:-5672}"
+      TICKET_RABBITMQ_USERNAME: "${TICKET_RABBITMQ_USERNAME:?请设置 TICKET_RABBITMQ_USERNAME}"
+      TICKET_RABBITMQ_PASSWORD: "${TICKET_RABBITMQ_PASSWORD:?请设置 TICKET_RABBITMQ_PASSWORD}"
+      TICKET_RABBITMQ_VHOST: "${TICKET_RABBITMQ_VHOST:-/}"
+      TICKET_INTERNAL_TOKEN: "${TICKET_INTERNAL_TOKEN:?请设置 TICKET_INTERNAL_TOKEN}"
+      NACOS_SERVER_ADDR: "${NACOS_SERVER_ADDR:?请设置 NACOS_SERVER_ADDR}"
+      NACOS_USERNAME: "${NACOS_USERNAME:-}"
+      NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}"
+      SPRING_CLOUD_NACOS_DISCOVERY_PORT: "${ORDER_HOST_PORT:-8083}"
+      SPRING_PROFILES_ACTIVE: cloud
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-gateway:${TICKET_IMAGE_TAG:-latest}"
+    ports:
+      - "${BACKEND_HOST_PORT:-8080}:8080"
+    environment:
+      NACOS_SERVER_ADDR: "${NACOS_SERVER_ADDR:?请设置 NACOS_SERVER_ADDR}"
+      NACOS_USERNAME: "${NACOS_USERNAME:-}"
+      NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
+      SPRING_CLOUD_NACOS_DISCOVERY_IP: "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}"
+      SPRING_CLOUD_NACOS_DISCOVERY_PORT: "${BACKEND_HOST_PORT:-8080}"
+      SPRING_PROFILES_ACTIVE: cloud
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-web:${TICKET_IMAGE_TAG:-latest}"
+    environment:
+      VITE_API_TARGET: "${GATEWAY_URL:?请设置前端容器可访问的 Gateway 地址}"
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:5173"
+    restart: unless-stopped
+
+volumes:
+  backend-uploads:

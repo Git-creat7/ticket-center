@@ -8,6 +8,15 @@ const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
   hour12: false,
 })
+const dateTimeFormatterWithYear = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
 
 /** Parses Spring's local datetime without treating it as UTC. */
 export function parseBackendDateTime(value: BackendDateTime): Date {
@@ -16,7 +25,11 @@ export function parseBackendDateTime(value: BackendDateTime): Date {
 
 export function formatDateTime(value: BackendDateTime | Date): string {
   const date = value instanceof Date ? value : parseBackendDateTime(value)
-  return Number.isNaN(date.getTime()) ? '--' : dateTimeFormatter.format(date)
+  if (Number.isNaN(date.getTime())) return '--'
+  const formatter = date.getFullYear() === new Date().getFullYear()
+    ? dateTimeFormatter
+    : dateTimeFormatterWithYear
+  return formatter.format(date)
 }
 
 export function toBackendDateTime(value: Date): BackendDateTime {

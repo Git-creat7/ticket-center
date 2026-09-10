@@ -6,6 +6,7 @@ import { reservationStatus } from '../../utils/reservations'
 
 const props = defineProps<{ reservation: TicketReservation }>()
 const status = computed(() => reservationStatus(props.reservation))
+const paymentExpired = computed(() => status.value.label === '已超时')
 const orderFilter = computed(() => {
   if (props.reservation.orderStatus === 0) return 'pending'
   if (props.reservation.orderStatus === 1) return 'issued'
@@ -40,8 +41,8 @@ const orderFilter = computed(() => {
       custom
       :to="{ path: '/orders', query: { status: orderFilter } }"
     >
-      <el-button :type="reservation.orderStatus === 0 ? 'primary' : 'default'" @click="navigate">
-        {{ reservation.orderStatus === 0 ? '前往支付' : '查看订单' }}
+      <el-button :type="reservation.orderStatus === 0 && !paymentExpired ? 'primary' : 'default'" @click="navigate">
+        {{ reservation.orderStatus === 0 && !paymentExpired ? '前往支付' : '查看订单' }}
       </el-button>
     </RouterLink>
   </article>

@@ -9,8 +9,6 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./deploy/mysql/01-ticket.sql:/docker-entrypoint-initdb.d/01-ticket.sql:ro
-      - ./deploy/mysql/02-order.sql:/docker-entrypoint-initdb.d/02-order.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
@@ -58,8 +56,8 @@ services:
       NACOS_AUTH_ENABLE: "false"
       TZ: Asia/Shanghai
     ports:
-      - "127.0.0.1:${NACOS_HOST_PORT:-8848}:8848"
-      - "127.0.0.1:${NACOS_GRPC_HOST_PORT:-9848}:9848"
+      - "${NACOS_BIND_IP:-127.0.0.1}:${NACOS_HOST_PORT:-8848}:8848"
+      - "${NACOS_BIND_IP:-127.0.0.1}:${NACOS_GRPC_HOST_PORT:-9848}:9848"
     volumes:
       - nacos-data:/home/nacos/data
     healthcheck:

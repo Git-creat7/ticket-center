@@ -1,4 +1,5 @@
 import type { ApiId, TicketReservation } from '../types/api'
+import { parseBackendDateTime } from './format.ts'
 
 export interface ReservationRequest {
   requestId: string
@@ -34,10 +35,14 @@ export function clearReservationRequest(userId: ApiId, ticketId: ApiId): void {
   sessionStorage.removeItem(requestKey(userId, ticketId))
 }
 
-export function reservationStatus(reservation: TicketReservation) {
+export function reservationStatus(reservation: TicketReservation, now = Date.now()) {
   if (reservation.status === 0) return { label: '处理中', type: 'warning' as const }
   if (reservation.status === 2) return { label: '预约失败', type: 'danger' as const }
   if (reservation.status === 3) return { label: '已取消', type: 'info' as const }
+  if (reservation.orderStatus === 0 && reservation.paymentDeadline
+    && parseBackendDateTime(reservation.paymentDeadline).getTime() <= now) {
+    return { label: '已超时', type: 'info' as const }
+  }
   if (reservation.orderStatus === 0) return { label: '待支付', type: 'warning' as const }
   if (reservation.orderStatus === 1) return { label: '已出票', type: 'success' as const }
   return { label: reservation.statusDesc, type: 'success' as const }

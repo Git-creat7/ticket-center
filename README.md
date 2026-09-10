@@ -11,9 +11,8 @@
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI/CD-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 > 活动票务预约平台。个人全栈项目，后端围绕高并发抢票、缓存设计与消息驱动的最终一致性展开。
 >
-> **个人独立完成**：后端整体架构设计、核心抢票链路、并发控制、缓存优化、数据库设计、自动化测试、压测验证，以及 CI/CD 流水线与镜像交付方案设计。
-> **Agent 协助完成**：前端页面开发、部分部署脚本与配置模板；本人负责接口定义、业务逻辑对齐、全链路联调与正确性校验。
-
+> **个人独立完成**：后端整体架构设计、核心抢票链路、并发控制、缓存优化、数据库设计、自动化测试、压测验证，以及 CI/CD 流水线与镜像交付方案设计。  
+> **Agent 协助完成**：前端页面开发、部分部署脚本、配置模板以及文档整理
 ## 1. 项目简介 + 核心成果
 
 票务抢购的难点在于大量用户同时争抢有限库存：不能超卖，也不能用过重的锁把吞吐压垮。本项目将库存预扣、异步建单、限时支付和库存回补串成一条可恢复链路，并通过预约与候补处理售罄场景。
@@ -146,13 +145,15 @@ ticket-center/
 ├─ docker-compose.middleware.yml   MySQL、Redis、RabbitMQ、Nacos
 ├─ docker-compose.init.yml         数据库账号和 Nacos 配置初始化
 ├─ docker-compose.app.yml          GHCR 应用镜像
+├─ docker-compose.app-prod.yml     多服务器应用镜像，外接中间件
 └─ PROGRESS.md                     优化决策与排查记录
 ```
 
 ## 8. 设计边界与后续规划
 
 - 支付目前只做订单状态流转，验证码只写入 Redis，未接入真实支付和短信服务。
-- Nacos 是单节点开发部署，Redis 当前也是单节点，不能据此宣称生产高可用。
+- 应用层支持多服务器多实例部署：每台节点运行 Gateway、`ticket-center-api` 和 `order-service`，向同一 Nacos 注册各自的宿主机私网 IP 和映射端口，Gateway/OpenFeign 按服务名调用。`docker-compose.app-prod.yml` 独立连接共享中间件，入口负载均衡需另行配置；当前只完成单机运行与配置校验，跨服务器联调仍待验证。
+- 应用多实例不等于中间件高可用：仓库自带的 MySQL、Redis、RabbitMQ、Nacos 仍是单节点，Nacos 默认关闭鉴权；实际生产需独立配置鉴权、访问控制及高可用部署。多台 API 实例上传文件需使用 OSS 或共享文件系统，不能依赖各自的本地数据卷。
 - MySQL 与 Redis 没有分布式事务；预约通过持久化任务重试，恢复前可能短暂处于处理中。
 - 死信补偿失败队列暂需人工对账；登录校验失败暂未做限流和锁定。
 - 候补每个票档只处理一个进行中的递补，吞吐量需要单独压测。
@@ -161,7 +162,7 @@ ticket-center/
 
 ## 9. 快速启动 / 部署说明
 
-详细环境变量、初始化说明和本机调试方式见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。线上只需要三份 Compose、`deploy/` 和 `.env`，不需要源码或 Dockerfile：
+详细环境变量、初始化说明和本机调试方式见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。单机部署只需要以下三份 Compose、`deploy/` 和 `.env`，不需要源码或 Dockerfile：
 
 ```bash
 cp .env.example .env
@@ -170,6 +171,8 @@ docker compose -f docker-compose.middleware.yml -f docker-compose.init.yml -f do
 docker compose -f docker-compose.middleware.yml -f docker-compose.init.yml -f docker-compose.app.yml --profile full up -d
 docker compose -f docker-compose.middleware.yml -f docker-compose.init.yml -f docker-compose.app.yml --profile full ps
 ```
+
+多服务器的应用节点只使用 `docker-compose.app-prod.yml` 和 `.env`，连接已初始化的共享中间件，见[多服务器部署](docs/DEPLOYMENT.md#9-多服务器部署)。不要与单机应用编排合并使用。
 
 ## 10. 接口说明 / 演示地址
 

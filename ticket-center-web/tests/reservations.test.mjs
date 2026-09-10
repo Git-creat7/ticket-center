@@ -55,6 +55,7 @@ test('damaged local data does not prevent a new request', () => {
 test('reservation and order statuses have distinct labels', () => {
   assert.equal(reservationStatus({ status: 0 }).label, '处理中')
   assert.equal(reservationStatus({ status: 1, orderStatus: 0 }).label, '待支付')
+  assert.equal(reservationStatus({ status: 1, orderStatus: 0, paymentDeadline: '2000-01-01 00:00:00' }).label, '已超时')
   assert.equal(reservationStatus({ status: 1, orderStatus: 1 }).label, '已出票')
   assert.equal(reservationStatus({ status: 2 }).label, '预约失败')
   assert.equal(reservationStatus({ status: 3, orderStatus: 2 }).label, '已取消')
