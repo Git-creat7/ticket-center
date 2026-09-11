@@ -2,7 +2,7 @@
 
 > **测量时间**：2026-09-03
 > **工具**：Apache JMeter 5.6.3（CLI 模式，`-n -t -l -e -o`）
-> **被测服务**：组合 `docker-compose.middleware.yml`、`docker-compose.init.yml`、`docker-compose.app.yml`，后端与中间件均在容器内
+> **被测服务**：拆分前的单体版本（commit `c6f62acf`，单文件 `docker compose --profile full`），后端与中间件均在容器内
 > **环境**：Spring Boot 3.5.14 / Java 17 / Tomcat 10.1、MySQL 8.4（HikariCP）、Redis 7（Lettuce `max-active: 50` + Redisson + Lua + Bitmap）、RabbitMQ 3.13
 
 ## 一、测量口径

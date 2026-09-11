@@ -2,6 +2,8 @@
 set -euo pipefail
 
 benchmark_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Git Bash 里转成 F:/... 形式，Windows 上的 JMeter 和 Python 才认得由它派生的路径；Linux 下无 cygpath，原样不动。
+command -v cygpath >/dev/null 2>&1 && benchmark_dir="$(cygpath -m "$benchmark_dir")"
 jmeter_exec="${JMETER_EXEC:-jmeter}"
 mysql_container="${MYSQL_CONTAINER:-ticket-mysql}"
 event_id="${BENCHMARK_EVENT_ID:-1}"
@@ -33,7 +35,8 @@ esac
 
 [[ "$event_id" =~ ^[1-9][0-9]*$ ]] || { echo "BENCHMARK_EVENT_ID 必须是正整数" >&2; exit 1; }
 for dependency in docker python3 "$jmeter_exec"; do
-    command -v "$dependency" >/dev/null || { echo "缺少依赖: $dependency" >&2; exit 1; }
+    # Git Bash 的 command -v 不认 .bat，JMETER_EXEC 指向文件时按文件是否存在判断
+    command -v "$dependency" >/dev/null || [[ -f "$dependency" ]] || { echo "缺少依赖: $dependency" >&2; exit 1; }
 done
 
 mysql_query() {
@@ -109,7 +112,8 @@ while (( SECONDS < deadline )); do
 done
 [[ "$pending" == 0 ]] || { echo "预约或补偿任务在 120 秒内未处理完成" >&2; exit 1; }
 
-response_ids="$(python3 - "$results_dir/seckill_reserve.jtl" <<'PY'
+# Windows 上的 Python 往管道写的是 \r\n，去掉 \r 才能和容器里 mysql 的输出逐行比较。
+response_ids="$(python3 - "$results_dir/seckill_reserve.jtl" <<'PY' | tr -d '\r'
 import csv
 import sys
 

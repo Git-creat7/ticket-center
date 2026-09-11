@@ -2,7 +2,7 @@ services:
   ticket-center-api:
     image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/ticket-center-api:${TICKET_IMAGE_TAG:-latest}"
     ports:
-      - "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}:${CORE_HOST_PORT:-8082}:8082"
+      - "${CORE_HOST_PORT:-8082}:8082"
     environment:
       DB_URL: "${DB_URL:?请设置 DB_URL}"
       DB_USERNAME: "${DB_USERNAME:-ticket_core}"
@@ -15,6 +15,7 @@ services:
       NACOS_USERNAME: "${NACOS_USERNAME:-}"
       NACOS_PASSWORD: "${NACOS_PASSWORD:-}"
       NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
+      # 仅用于服务注册，不参与端口绑定
       SPRING_CLOUD_NACOS_DISCOVERY_IP: "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}"
       SPRING_CLOUD_NACOS_DISCOVERY_PORT: "${CORE_HOST_PORT:-8082}"
       SPRING_PROFILES_ACTIVE: cloud
@@ -39,7 +40,7 @@ services:
   order-service:
     image: "${TICKET_IMAGE_REPOSITORY:-ghcr.io/git-creat7/ticket-center}/order-service:${TICKET_IMAGE_TAG:-latest}"
     ports:
-      - "${NACOS_DISCOVERY_IP:?请设置当前应用节点的私网 IP}:${ORDER_HOST_PORT:-8083}:8083"
+      - "${ORDER_HOST_PORT:-8083}:8083"
     environment:
       ORDER_DB_URL: "${ORDER_DB_URL:?请设置 ORDER_DB_URL}"
       ORDER_DB_USERNAME: "${ORDER_DB_USERNAME:-ticket_order}"

@@ -24,8 +24,10 @@ import asia.creat.utils.UserHolder;
 import asia.creat.vo.TicketReservationVO;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -39,6 +41,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TicketReservationServiceImpl implements TicketReservationService {
@@ -62,9 +65,19 @@ public class TicketReservationServiceImpl implements TicketReservationService {
             throw new BusinessException(400, "预约请求标识格式不正确");
         }
         boolean credits = Boolean.TRUE.equals(useCredits);
-        TicketReservation existing = findRequest(userId, idempotencyKey);
+        // 服务端生成的请求号不可能已存在，客户端带 requestId 重试时才查幂等记录。
+        TicketReservation existing = requestId == null ? null : findRequest(userId, idempotencyKey);
         if (existing != null) {
             return checkRequest(existing, ticketId, credits);
+        }
+
+        existing = reservationMapper.selectOne(new QueryWrapper<TicketReservation>()
+                .eq("user_id", userId).eq("ticket_id", ticketId).eq("active_flag", 1));
+        if (existing != null) {
+            if (Objects.equals(existing.getRequestId(), idempotencyKey)) {
+                return checkRequest(existing, ticketId, credits);
+            }
+            throw new BusinessException("已有有效预约，请查看预约记录");
         }
 
         Ticket ticket = ticketMapper.selectById(ticketId);
@@ -96,6 +109,19 @@ public class TicketReservationServiceImpl implements TicketReservationService {
         reservation.setPrice(ticket.getPrice());
         reservation.setStatus(TicketReservation.PROCESSING);
         reservation.setReleasePending(false);
+
+        // 先在 Redis 预扣，库存不足在这里就拒掉，不进 MySQL 事务、不排票档行锁。
+        // 脚本按预约号幂等，恢复任务里 reserveStock 再跑一次不会重复扣减。
+        Long admitted = reserveInRedis(reservation);
+        if (Long.valueOf(1).equals(admitted)) {
+            throw new BusinessException("库存不足");
+        }
+        // 返回 2 是同一用户在 Redis 里已挂着别的预约号：可能是并发的同一请求尚未提交，也可能是残留记录，
+        // 都交给事务里的唯一约束判定；这种情况没有预扣，事务失败也不需要回补。
+        boolean deducted = Long.valueOf(0).equals(admitted);
+        if (!deducted && !Long.valueOf(2).equals(admitted)) {
+            throw new IllegalStateException("Redis 预约状态暂不可用");
+        }
         try {
             transactionTemplate.executeWithoutResult(status -> {
                 stockMapper.selectForUpdate(ticketId);
@@ -106,11 +132,19 @@ public class TicketReservationServiceImpl implements TicketReservationService {
                 taskMapper.add(reservation.getId(), ReservationTask.SEND_ORDER);
             });
         } catch (DuplicateKeyException e) {
+            if (deducted) {
+                rollbackRedis(reservation);
+            }
             existing = findRequest(userId, idempotencyKey);
             if (existing != null) {
                 return checkRequest(existing, ticketId, credits);
             }
             throw new BusinessException("已有有效预约，请查看预约记录", e);
+        } catch (RuntimeException e) {
+            if (deducted) {
+                rollbackRedis(reservation);
+            }
+            throw e;
         }
 
         return reservation.getId();
@@ -126,12 +160,26 @@ public class TicketReservationServiceImpl implements TicketReservationService {
                 && !reservationScript.isReserved(ticketId, reservation.getUserId(), reservation.getId())) {
             return 4L;
         }
+        return reserveInRedis(reservation);
+    }
+
+    private Long reserveInRedis(TicketReservation reservation) {
+        Long ticketId = reservation.getTicketId();
         Long result = reservationScript.reserve(ticketId, reservation.getUserId(), reservation.getId());
         if (Long.valueOf(3).equals(result)) {
             stockCacheInitializer.initialize(ticketId);
             result = reservationScript.reserve(ticketId, reservation.getUserId(), reservation.getId());
         }
         return result;
+    }
+
+    private void rollbackRedis(TicketReservation reservation) {
+        try {
+            reservationScript.rollback(reservation.getTicketId(), reservation.getUserId(), reservation.getId());
+        } catch (RuntimeException e) {
+            // 回补失败只是预扣泄漏，重启预热会对齐；不能盖掉调用方原本的异常。
+            log.warn("预约落库失败后 Redis 回补失败，reservationId={}", reservation.getId(), e);
+        }
     }
 
     private TicketReservation findRequest(Long userId, String requestId) {

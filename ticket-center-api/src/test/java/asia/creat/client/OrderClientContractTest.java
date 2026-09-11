@@ -17,7 +17,6 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -41,12 +40,9 @@ class OrderClientContractTest {
     private static HttpServer server() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext("/internal/", exchange -> {
+            server.createContext("/internal/credits/42", exchange -> {
                 boolean authorized = "contract-token".equals(exchange.getRequestHeaders().getFirst("X-Ticket-Internal-Token"));
-                String path = exchange.getRequestURI().getPath();
-                String response = path.equals("/internal/credits/42") ? "120"
-                        : "[{\"id\":1,\"stock\":0,\"hasWaitlist\":true,\"beginTime\":\"2030-01-01 12:00:00\"}]";
-                byte[] body = response.getBytes(StandardCharsets.UTF_8);
+                byte[] body = "120".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(authorized ? 200 : 403, body.length);
                 try (var output = exchange.getResponseBody()) {
@@ -71,16 +67,7 @@ class OrderClientContractTest {
     }
 
     @Test
-    void feignSendsCredentialAndDeserializesTicketView() {
-        var tickets = client.queryTickets(1L);
-        assertEquals(1, tickets.size());
-        assertEquals(0, tickets.get(0).getStock());
-        assertTrue(tickets.get(0).getHasWaitlist());
-        assertEquals(LocalDateTime.of(2030, 1, 1, 12, 0), tickets.get(0).getBeginTime());
-    }
-
-    @Test
-    void feignReadsBalanceWithoutLoadingUserEntity() {
+    void feignSendsCredentialAndReadsBalance() {
         assertEquals(120, client.getCredits(42L));
     }
 }

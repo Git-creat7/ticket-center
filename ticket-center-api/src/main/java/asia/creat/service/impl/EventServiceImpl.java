@@ -1,6 +1,5 @@
 package asia.creat.service.impl;
 
-import asia.creat.client.OrderClient;
 import asia.creat.common.exception.BusinessException;
 import asia.creat.dto.EventCreateDTO;
 import asia.creat.dto.EventQueryDTO;
@@ -58,7 +57,6 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
     private final CacheClient cacheClient;
     private final StringRedisTemplate stringRedisTemplate;
     private final EventCategoryService eventCategoryService;
-    private final OrderClient orderClient;
 
     @Override
     public EventDetailVO queryById(Long id) {
@@ -68,8 +66,6 @@ public class EventServiceImpl extends ServiceImpl<EventMapper, Event> implements
         if (vo == null) {
             throw new BusinessException(404, "演出不存在");
         }
-        // 库存和候补状态由订单服务实时返回，不放进活动缓存。
-        vo.setTickets(orderClient.queryTickets(id));
         return vo;
     }
 

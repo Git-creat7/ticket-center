@@ -184,13 +184,13 @@ docker compose \
 
 `docker-compose.app-prod.yml` 是独立的应用编排，不含 `depends_on`、固定容器名或源码构建，也不启动中间件。每台应用服务器运行一套前端、Gateway、`ticket-center-api` 和 `order-service`，连接同一组 MySQL、Redis、RabbitMQ 和 Nacos。入口负载均衡需单独配置，把请求分发到两台前端（5173）；直接调用 API 时分发到两台 Gateway（8080）。
 
-以下以中间件服务器 `10.0.0.10`、应用节点 A `10.0.0.21` 和 B `10.0.0.22` 为例。中间件仍可单节点用于多实例演示，但不代表生产高可用；本仓库尚未完成真实多服务器联调。
+以下以中间件服务器 `10.0.0.10`、应用节点 A `10.0.0.21` 和 B `10.0.0.22` 为例。中间件仍可单节点用于多实例演示，但不代表生产高可用。这套拓扑已在两台主机上联调通过（一台同时跑中间件和节点 A，另一台跑节点 B），验收结果见本节末尾。
 
 ### 中间件准备
 
 先完成两个数据库、业务账号、RabbitMQ 用户和 Nacos 配置的初始化，再启动应用。可以在中间件服务器沿用 `docker-compose.middleware.yml` 与 `docker-compose.init.yml`；托管服务则按第 4、5 节准备数据库和配置。应用使用各自的业务数据库账号，不使用 root。
 
-沿用仓库的中间件编排时，在该服务器 `.env` 设置 `NACOS_BIND_IP=10.0.0.10`，让 Nacos 的 HTTP 和 gRPC 端口绑定私网；不设置时仍为 `127.0.0.1`，其他服务器无法访问。只向应用节点开放 MySQL 3306、Redis 6379、RabbitMQ 5672、Nacos 8848/9848。Nacos gRPC 端口必须是 HTTP 端口加 1000。实际生产还需要开启 Nacos 鉴权，不能将默认未鉴权的控制台暴露到公网。
+沿用仓库的中间件编排时，在该服务器 `.env` 设置 `NACOS_BIND_IP=10.0.0.10`，让 Nacos 的 HTTP 和 gRPC 端口绑定私网；不设置时仍为 `127.0.0.1`，其他服务器无法访问。绑定私网后，服务器自己的 `127.0.0.1:8848` 也不再可用，在服务器上检查注册表要用私网地址。只向应用节点开放 MySQL 3306、Redis 6379、RabbitMQ 5672、Nacos 8848/9848。Nacos gRPC 端口必须是 HTTP 端口加 1000。实际生产还需要开启 Nacos 鉴权，不能将默认未鉴权的控制台暴露到公网。
 
 ### 每台应用节点配置
 
@@ -211,8 +211,8 @@ GATEWAY_URL=http://10.0.0.21:8080
 节点 B 将 `NACOS_DISCOVERY_IP` 改为 `10.0.0.22`，`GATEWAY_URL` 改为 `http://10.0.0.22:8080`。这些是示例地址，部署时填写实际值。所有节点必须使用相同的 Redis、交易数据库、RabbitMQ vhost、`TICKET_INTERNAL_TOKEN` 和 Nacos namespace；开启 Nacos 鉴权后还要设置 `NACOS_USERNAME`、`NACOS_PASSWORD`。`ORDER_DB_PASSWORD` 未设置时沿用 `DB_PASSWORD`。
 
 - `NACOS_DISCOVERY_IP` 通过 `SPRING_CLOUD_NACOS_DISCOVERY_IP` 映射到 `spring.cloud.nacos.discovery.ip`，必须是当前宿主机的私网 IPv4 地址，不能用容器 IP、`localhost` 或 `0.0.0.0`。不要把这个每节点不同的值写入 Nacos 的共享配置。
-- API 与订单服务的端口只绑定该私网 IP。修改 `CORE_HOST_PORT`、`ORDER_HOST_PORT`、`BACKEND_HOST_PORT` 时，编排会同步设置 `spring.cloud.nacos.discovery.port`，注册宿主机端口而非容器端口；健康检查仍访问容器内的 9082、9083、9080，不对外映射管理端口。
-- 每台应用节点的容器必须能访问所有节点的注册 IP/端口，包括自己宿主机的私网地址。安全组、防火墙只对应用节点放行业务端口，前端/Gateway 入口只对负载均衡或必要的访问来源开放。
+- 修改 `CORE_HOST_PORT`、`ORDER_HOST_PORT`、`BACKEND_HOST_PORT` 时，编排会同步设置 `spring.cloud.nacos.discovery.port`，注册宿主机端口而非容器端口；改端口只改 `.env`，不要直接改编排里的 `ports`，否则注册端口不会跟着变。健康检查仍访问容器内的 9082、9083、9080，不对外映射管理端口。业务端口绑定在所有网卡上，对外隔离依赖防火墙或安全组。
+- 每台应用节点的容器必须能访问所有节点的注册 IP/端口，包括自己宿主机的私网地址。安全组、防火墙只对应用节点放行业务端口，前端/Gateway 入口只对负载均衡或必要的访问来源开放。节点是 Windows 时要为业务端口添加入站规则，端口改了规则也要跟着改，否则对端 Gateway 从 Nacos 拿到该实例后会有一半请求连接超时。
 - `GATEWAY_URL` 是前端容器代理使用的 Gateway 地址，不是浏览器的 API 地址；浏览器仍请求同源的 `/api`。可使用本节点私网 Gateway 或独立的 Gateway 负载均衡地址。不要设置直连业务实例的 `TICKET_API_URL`、`ORDER_SERVICE_URL`，否则会绕过服务发现。
 - 多台 API 必须启用同一个 OSS Bucket（`TICKET_OSS_ENABLED=true`，填写 AccessKey 等配置），或将 `/app/uploads` 改挂同一共享文件系统。默认 `backend-uploads` 只保存在单台机器，不能跨节点共享；已有本地上传文件需单独迁移。
 
@@ -227,6 +227,12 @@ docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml up -
 docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml ps
 ```
 
-没有 `depends_on` 不代表自动等待外部中间件就绪。启动失败时先看 `docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml logs --tail 100`；`restart: unless-stopped` 只在进程退出时重启，不会因 healthcheck 变成 unhealthy 自动重启。固定端口映射适合每台主机各一套，不要直接 `--scale`；同主机另起一套时需更换项目名和全部宿主机端口。
+没有 `depends_on` 不代表自动等待外部中间件就绪。启动失败时先看 `docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml logs --tail 100`；`restart: unless-stopped` 只在进程退出时重启，不会因 healthcheck 变成 unhealthy 自动重启。固定端口映射适合每台主机各一套，不要直接 `--scale`；同主机另起一套时需更换项目名和全部宿主机端口。中间件服务器同时作为应用节点时，默认的 8080、5173 常被其他项目占用，改 `BACKEND_HOST_PORT`、`FRONTEND_HOST_PORT` 等即可。
 
-验收时应在 Nacos 的同一 namespace、`TICKET_CENTER` 分组中看到每个 Java 服务各两个健康实例，例如 API 的 `10.0.0.21:8082` 和 `10.0.0.22:8082`。分别经两台 Gateway 验证活动和票档查询、共享登录态、预约到支付/取消链路及图片访问，再通过负载均衡复测。最后在测试环境停止一台应用节点，检查入口摘除、Nacos 实例摘除及剩余节点能否继续处理请求；这些结果通过前不要宣称多机容错已验收。
+`deploy/verify-multinode.sh` 自动做三档验收：从 Nacos 读注册表确认每个服务各有两个 healthy 实例、两侧 Gateway 容器直连对端 API、分别经两台 Gateway 各打 20 次请求并用容器内 actuator 的 `http.server.requests` 计数统计每个节点实际处理了多少次。在节点 B 上运行，通过 SSH 读取节点 A 的容器计数，脚本开头的 `SERVER_SSH`、`SERVER_IP`、`LOCAL_IP`、`GW_B_PORT` 按实际环境覆盖：
+
+```bash
+SERVER_IP=10.0.0.10 LOCAL_IP=10.0.0.22 GW_B_PORT=8080 bash deploy/verify-multinode.sh
+```
+
+实测结果：四组各 20 次请求全部 10/10 落到两个节点，零错误。`/event/hot` 走 `ticket-center-api`，未登录的 `/ticket/list/1` 由 `order-service` 返回 401，两条路径都经 Gateway 的 `lb://` 轮询分发。验收后再手工经两台前端验证登录态共享、预约到支付/取消链路及图片访问；停止一台应用节点检查 Nacos 实例摘除与剩余节点继续服务，这一项尚未做，通过前不要宣称多机容错已验收。

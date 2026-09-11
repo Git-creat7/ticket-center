@@ -34,12 +34,22 @@ mysql_root() {
         --skip-column-names "$@"
 }
 
+# 健康检查通过不等于 TCP 已开放、root 密码已生效（已有数据卷的 root 密码是它初始化时的那份 .env），
+# 先确认能连上，连不上就带着 mysql 的原始报错退出，不要让后面的建库判断把"连不上"当成"库不存在"。
+error=""
+for _ in $(seq 1 30); do
+    if error="$(mysql_root -e 'SELECT 1' 2>&1 >/dev/null)"; then break; fi
+    sleep 2
+done
+[ -z "$error" ] || { echo "无法以 root 连接 MySQL：$error" >&2; exit 1; }
+
 # 建库建表脚本含裸 CREATE TABLE 和种子数据，不能重复执行，
 # 所以按"库是否已存在"整文件跳过；镜像自带的 initdb 只在空数据卷首次生效，老卷升级会漏掉新库。
 init_schema() {
     db="$1"
     file="$2"
-    if [ -n "$(mysql_root -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '$db'")" ]; then
+    existing="$(mysql_root -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '$db'")"
+    if [ -n "$existing" ]; then
         echo "数据库 $db 已存在，跳过 $file"
         return
     fi

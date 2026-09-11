@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -31,5 +30,4 @@ public class EventDetailVO {
     private Long hot;
     private Integer comments;
     private Integer status;
-    private List<TicketVO> tickets;
 }

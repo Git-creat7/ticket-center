@@ -17,6 +17,7 @@ import asia.creat.service.TicketOrderService;
 import asia.creat.service.TicketReservationService;
 import asia.creat.support.IntegrationTestcontainers;
 import asia.creat.utils.RedisConstants;
+import asia.creat.utils.RedisIdWorker;
 import asia.creat.utils.TicketReservationScript;
 import asia.creat.utils.UserHolder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -25,6 +26,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,8 +38,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -61,11 +67,11 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
     private TicketReservationTaskProcessor processor;
     @Autowired
     private TicketStockCacheInitializer initializer;
-    @Autowired
+    @MockitoSpyBean
     private TicketReservationMapper reservationMapper;
-    @Autowired
+    @MockitoSpyBean
     private TicketMapper ticketMapper;
-    @Autowired
+    @MockitoSpyBean
     private TicketStockMapper stockMapper;
     @Autowired
     private TicketOrderMapper orderMapper;
@@ -82,6 +88,8 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
     private ReservationTaskMapper taskMapper;
     @MockitoSpyBean
     private TicketOrderProducer producer;
+    @MockitoSpyBean
+    private RedisIdWorker redisIdWorker;
 
     @BeforeEach
     void setUp() {
@@ -131,6 +139,97 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
         anotherUser.setId(USER_ID + 1);
         UserHolder.saveUser(anotherUser);
         assertThrows(BusinessException.class, () -> reservationService.getReservation(id));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,false", "1,false", "2,true", "3,true"})
+    @DisplayName("有效预约和待回补预约提前拒绝，不再查票档、生成 ID 或锁库存")
+    void activeReservationIsRejectedBeforeStockLock(int status, boolean releasePending) {
+        Long id = reservationService.reserveTicket(TICKET_ID, false, "active-request");
+        reservationMapper.update(null, new LambdaUpdateWrapper<TicketReservation>()
+                .eq(TicketReservation::getId, id)
+                .set(TicketReservation::getStatus, status)
+                .set(TicketReservation::getReleasePending, releasePending));
+        clearInvocations(ticketMapper, stockMapper, redisIdWorker, taskMapper);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> reservationService.reserveTicket(TICKET_ID, false, "another-request"));
+
+        assertEquals("已有有效预约，请查看预约记录", error.getMessage());
+        verifyNoInteractions(ticketMapper, stockMapper, redisIdWorker, taskMapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("相同请求在两次查询之间提交，仍按请求号校验并返回")
+    void requestCommittedBeforeActiveCheckRemainsIdempotent(boolean useCredits) {
+        Long id = reservationService.reserveTicket(TICKET_ID, false, "racing-request");
+        doReturn(null).when(reservationMapper).selectOne(argThat(query -> query instanceof LambdaQueryWrapper));
+        clearInvocations(ticketMapper, stockMapper, redisIdWorker, taskMapper);
+
+        if (useCredits) {
+            BusinessException error = assertThrows(BusinessException.class,
+                    () -> reservationService.reserveTicket(TICKET_ID, true, "racing-request"));
+            assertEquals(409, error.getCode());
+        } else {
+            assertEquals(id, reservationService.reserveTicket(TICKET_ID, false, "racing-request"));
+        }
+        verifyNoInteractions(ticketMapper, stockMapper, redisIdWorker, taskMapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("两个请求都未查到预约时，由唯一约束保证只创建一笔")
+    void concurrentRequestsStillCreateOneReservation(boolean sameRequest) throws Exception {
+        TicketStock stock = stockMapper.selectById(TICKET_ID);
+        CountDownLatch stockReads = new CountDownLatch(2);
+        doAnswer(invocation -> {
+            stockReads.countDown();
+            assertTrue(stockReads.await(5, TimeUnit.SECONDS));
+            return stock;
+        }).when(stockMapper).selectById(TICKET_ID);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Long>> results = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                String requestId = sameRequest ? "concurrent-request" : "concurrent-request-" + i;
+                results.add(pool.submit(() -> {
+                    UserDTO user = new UserDTO();
+                    user.setId(USER_ID);
+                    UserHolder.saveUser(user);
+                    try {
+                        return reservationService.reserveTicket(TICKET_ID, false, requestId);
+                    } finally {
+                        UserHolder.removeUser();
+                    }
+                }));
+            }
+            TicketReservation created = null;
+            int rejected = 0;
+            for (Future<Long> result : results) {
+                try {
+                    Long id = result.get(10, TimeUnit.SECONDS);
+                    if (created == null) {
+                        created = reservationMapper.selectById(id);
+                    }
+                    assertNotNull(created);
+                    assertEquals(created.getId(), id);
+                } catch (ExecutionException e) {
+                    BusinessException error = assertInstanceOf(BusinessException.class, e.getCause());
+                    assertEquals("已有有效预约，请查看预约记录", error.getMessage());
+                    rejected++;
+                }
+            }
+            assertNotNull(created);
+            assertEquals(sameRequest ? 0 : 1, rejected);
+            assertEquals(1, reservationMapper.selectCount(new LambdaQueryWrapper<TicketReservation>()
+                    .eq(TicketReservation::getTicketId, TICKET_ID)));
+            assertEquals(1, taskMapper.selectCount(new LambdaQueryWrapper<ReservationTask>()
+                    .eq(ReservationTask::getReservationId, created.getId())));
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 
     @Test

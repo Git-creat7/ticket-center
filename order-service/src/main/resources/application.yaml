@@ -70,7 +70,7 @@ mybatis-plus:
   type-aliases-package: asia.creat.entity
 logging:
   level:
-    asia.creat: debug
+    asia.creat: info
 ticket:
   internal-token: ${TICKET_INTERNAL_TOKEN:}
   clients:

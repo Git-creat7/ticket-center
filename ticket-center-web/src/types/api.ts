@@ -101,7 +101,6 @@ export interface EventDetail extends EventListItem {
   images: string
   intro: string
   status: number
-  tickets?: Ticket[]
 }
 
 export interface EventQuery extends PageQuery {
