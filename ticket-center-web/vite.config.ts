@@ -32,5 +32,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy,
+    // 容器里用 preview 托管，默认只放行 localhost 和 IP；经域名或负载均衡访问时用逗号分隔列出域名，或填 true。
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS === 'true' ? true
+      : (process.env.VITE_ALLOWED_HOSTS?.split(',').map((h) => h.trim()).filter(Boolean) ?? []),
   },
 })

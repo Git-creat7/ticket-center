@@ -2,21 +2,22 @@
 # 多服务器联调验收：Nacos 注册表、容器级跨主机可达性、Gateway 负载均衡分发。
 # 在能免密 SSH 到中间件服务器的机器上运行（本机即节点 B）：
 #   bash deploy/verify-multinode.sh
-# 可用环境变量覆盖：SERVER_SSH、SERVER_IP、LOCAL_IP、GW_B_PORT、N
+# 必填 SERVER_SSH、SERVER_IP、LOCAL_IP；可选 GW_B_PORT、NACOS_PORT、N
 set -u
 export MSYS_NO_PATHCONV=1
 
-SERVER_SSH="${SERVER_SSH:-creat@10.115.110.241}"
-SERVER_IP="${SERVER_IP:-10.115.110.241}"
-LOCAL_IP="${LOCAL_IP:-10.115.82.254}"
-GW_B_PORT="${GW_B_PORT:-18081}"
+SERVER_SSH="${SERVER_SSH:?例如 user@10.0.0.10，能免密 SSH 到中间件服务器}"
+SERVER_IP="${SERVER_IP:?中间件服务器私网 IP}"
+LOCAL_IP="${LOCAL_IP:?本机私网 IP}"
+GW_B_PORT="${GW_B_PORT:-8080}"
+NACOS_PORT="${NACOS_PORT:-8848}"
 N="${N:-20}"
 
 remote() { ssh -o BatchMode=yes -o ConnectTimeout=15 "$SERVER_SSH" "$@"; }
 
 # Nacos 按 NACOS_BIND_IP 只绑私网地址，服务器上的 127.0.0.1:8848 不通，直接从本机查。
 nacos_instances() {
-  curl -s -m 8 "http://$SERVER_IP:8848/nacos/v1/ns/instance/list?serviceName=$1&groupName=TICKET_CENTER" \
+  curl -s -m 8 "http://$SERVER_IP:$NACOS_PORT/nacos/v1/ns/instance/list?serviceName=$1&groupName=TICKET_CENTER" \
     | grep -oE '"ip":"[^"]+","port":[0-9]+,"weight":[0-9.]+,"healthy":(true|false)' \
     | sed -E 's/"ip":"([^"]+)","port":([0-9]+),"weight":[0-9.]+,"healthy":(true|false)/\1:\2(\3)/'
 }
@@ -79,5 +80,5 @@ echo
 echo "== 3. Gateway 负载均衡分发（期望 A、B 各约一半）"
 distribute "Gateway A" "http://$SERVER_IP:$GW_A_PORT" "/event/hot"     "$API_B"   "$API_A"   9082 "uri:/event/hot"
 distribute "Gateway B" "http://127.0.0.1:$GW_B_PORT"  "/event/hot"     "$API_B"   "$API_A"   9082 "uri:/event/hot"
-distribute "Gateway A" "http://$SERVER_IP:$GW_A_PORT" "/ticket/list/1" "$ORDER_B" "$ORDER_A" 9083 "status:401"
-distribute "Gateway B" "http://127.0.0.1:$GW_B_PORT"  "/ticket/list/1" "$ORDER_B" "$ORDER_A" 9083 "status:401"
+distribute "Gateway A" "http://$SERVER_IP:$GW_A_PORT" "/ticket-orders/me" "$ORDER_B" "$ORDER_A" 9083 "status:401"
+distribute "Gateway B" "http://127.0.0.1:$GW_B_PORT"  "/ticket-orders/me" "$ORDER_B" "$ORDER_A" 9083 "status:401"

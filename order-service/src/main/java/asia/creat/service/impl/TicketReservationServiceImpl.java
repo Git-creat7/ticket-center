@@ -197,7 +197,7 @@ public class TicketReservationServiceImpl implements TicketReservationService {
             }
             Ticket ticket = new Ticket();
             ticket.setId(ticketId);
-            ticket.setStatus(Integer.valueOf(cached.get("status").toString()));
+            ticket.setStatus("null".equals(cached.get("status")) ? null : Integer.valueOf(cached.get("status").toString()));
             ticket.setPrice(Long.valueOf(cached.get("price").toString()));
             if (cached.containsKey("beginTime")) {
                 ticket.setBeginTime(LocalDateTime.parse(cached.get("beginTime").toString()));
@@ -210,7 +210,7 @@ public class TicketReservationServiceImpl implements TicketReservationService {
         if (ticket == null) {
             fields.put("missing", "1");
         } else {
-            fields.put("status", ticket.getStatus().toString());
+            fields.put("status", String.valueOf(ticket.getStatus()));
             fields.put("price", ticket.getPrice().toString());
             TicketStock stock = stockMapper.selectById(ticketId);
             if (stock != null) {

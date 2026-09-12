@@ -13,6 +13,7 @@ services:
       TICKET_REDIS_PASSWORD: "${TICKET_REDIS_PASSWORD:?请先在 .env 中设置 TICKET_REDIS_PASSWORD}"
       TICKET_INTERNAL_TOKEN: "${TICKET_INTERNAL_TOKEN:?请先在 .env 中设置 TICKET_INTERNAL_TOKEN}"
       NACOS_SERVER_ADDR: nacos:8848
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
       SPRING_PROFILES_ACTIVE: cloud
       TICKET_OSS_ENABLED: "${TICKET_OSS_ENABLED:-false}"
       TICKET_OSS_ENDPOINT: "${TICKET_OSS_ENDPOINT:-https://oss-cn-beijing.aliyuncs.com}"
@@ -55,6 +56,7 @@ services:
       TICKET_RABBITMQ_PASSWORD: "${TICKET_RABBITMQ_PASSWORD:?请先在 .env 中设置 TICKET_RABBITMQ_PASSWORD}"
       TICKET_INTERNAL_TOKEN: "${TICKET_INTERNAL_TOKEN:?请先在 .env 中设置 TICKET_INTERNAL_TOKEN}"
       NACOS_SERVER_ADDR: nacos:8848
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
       SPRING_PROFILES_ACTIVE: cloud
     depends_on:
       mysql-init:
@@ -79,6 +81,7 @@ services:
       - "${BACKEND_HOST_PORT:-8080}:8080"
     environment:
       NACOS_SERVER_ADDR: nacos:8848
+      NACOS_NAMESPACE: "${NACOS_NAMESPACE:-}"
       SPRING_PROFILES_ACTIVE: cloud
     depends_on:
       ticket-center-api:
@@ -97,6 +100,7 @@ services:
     container_name: ticket-frontend
     environment:
       VITE_API_TARGET: "http://gateway:8080"
+      VITE_ALLOWED_HOSTS: "${VITE_ALLOWED_HOSTS:-}"
     ports:
       - "${FRONTEND_HOST_PORT:-5173}:5173"
     depends_on:

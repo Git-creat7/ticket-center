@@ -16,8 +16,10 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -32,12 +34,13 @@ public class TicketReservationTaskProcessor {
     // 测试按步骤驱动任务，关掉即时推送。
     @Value("${ticket.reservation.immediate-dispatch:true}")
     private boolean immediate;
-    // 即时推送只是让"处理中"更快结束，队列堆积时由定时扫描兜住。
-    private final Executor executor = Executors.newFixedThreadPool(4, runnable -> {
-        Thread thread = new Thread(runnable, "reservation-task");
-        thread.setDaemon(true);
-        return thread;
-    });
+    // 即时推送只是让"处理中"更快结束，队列满了直接丢，由定时扫描兜住。
+    private final Executor executor = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(1000), runnable -> {
+                Thread thread = new Thread(runnable, "reservation-task");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.DiscardPolicy());
 
     @Scheduled(fixedDelay = 1000)
     public void processTasks() {
@@ -55,12 +58,16 @@ public class TicketReservationTaskProcessor {
             @Override
             public void afterCommit() {
                 executor.execute(() -> {
-                    ReservationTask task = taskMapper.selectOne(new LambdaQueryWrapper<ReservationTask>()
-                            .eq(ReservationTask::getReservationId, reservationId)
-                            .eq(ReservationTask::getType, type)
-                            .eq(ReservationTask::getStatus, 0));
-                    if (task != null) {
-                        process(task);
+                    try {
+                        ReservationTask task = taskMapper.selectOne(new LambdaQueryWrapper<ReservationTask>()
+                                .eq(ReservationTask::getReservationId, reservationId)
+                                .eq(ReservationTask::getType, type)
+                                .eq(ReservationTask::getStatus, 0));
+                        if (task != null) {
+                            process(task);
+                        }
+                    } catch (Exception e) {
+                        log.warn("即时推送失败，等待定时扫描，reservationId={}", reservationId, e);
                     }
                 });
             }

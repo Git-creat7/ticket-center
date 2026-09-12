@@ -1,7 +1,7 @@
 # Ticket Center
 ![Java](https://img.shields.io/badge/Java-17-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
-![Spring Cloud](https://img.shields.io/badge/Spring_Cloud-2023-blue?style=for-the-badge&logo=spring&logoColor=white)
+![Spring Cloud](https://img.shields.io/badge/Spring_Cloud-2025-blue?style=for-the-badge&logo=spring&logoColor=white)
 ![Vue.js](https://img.shields.io/badge/Vue.js-3.x-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.x-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
@@ -136,12 +136,12 @@ ticket-center/
 ├─ ticket-common/                  通用响应、会话校验、配置、跨服务 DTO
 ├─ ticket-center-api/              用户、活动与社区服务，ticket_center 库
 ├─ order-service/                  交易与积分服务，ticket_order 库
-│  ├─ src/main/resources/lua/      库存预扣、回补、候补脚本
+│  ├─ src/main/resources/lua/      库存初始化、预扣、回补脚本
 │  ├─ src/main/resources/db/       交易库 SQL
 │  └─ src/test/                    预约、候补、订单一致性测试
 ├─ ticket-gateway/                 统一入口与服务路由
 ├─ ticket-center-web/              Vue 3 用户端
-├─ deploy/                         MySQL 账号和 Nacos 配置初始化
+├─ deploy/                         建库 SQL、账号与 Nacos 配置初始化、多节点验收脚本
 ├─ benchmark/                      JMeter 计划、Linux 脚本与报告
 ├─ docs/DEPLOYMENT.md              详细部署说明
 ├─ Dockerfile                      CI 构建 Java 镜像，线上不需要

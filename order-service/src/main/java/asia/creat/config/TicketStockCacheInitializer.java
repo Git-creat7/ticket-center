@@ -41,7 +41,8 @@ public class TicketStockCacheInitializer implements ApplicationRunner {
     private final TransactionTemplate transactionTemplate;
     private final TicketReservationScript reservationScript;
 
-    private static final long ORPHAN_GRACE_SECONDS = 60;
+    // 要盖过开售瞬间排行锁的等待时间，宁可回补得晚。
+    private static final long ORPHAN_GRACE_SECONDS = 600;
 
     private static final DefaultRedisScript<Long> INITIALIZE_SCRIPT = new DefaultRedisScript<>();
 
@@ -61,6 +62,7 @@ public class TicketStockCacheInitializer implements ApplicationRunner {
         activeOrders.forEach(order -> ticketIds.add(order.getTicketId()));
         for (Long ticketId : ticketIds) {
             initialize(ticketId);
+            releaseOrphans(ticketId);
         }
         log.info("Redis 票档库存检查完成，覆盖 {} 个票档", ticketIds.size());
     }
@@ -79,11 +81,11 @@ public class TicketStockCacheInitializer implements ApplicationRunner {
             stringRedisTemplate.execute(INITIALIZE_SCRIPT,
                     List.of(RedisConstants.ticketStockKey(ticketId), RedisConstants.ticketOrderKey(ticketId),
                             RedisConstants.ticketReservationKey(ticketId)), args.toArray());
-            releaseOrphans(ticketId);
         });
     }
 
     // 受理时先在 Redis 预扣，落库前进程退出会留下没有预约记录的占用；预约号里带受理时刻，过了宽限期还查不到就回补。
+    // 只在启动时跑：initialize 会被候补路径高频调用，不能带上这个全量扫描。
     private void releaseOrphans(Long ticketId) {
         Map<Object, Object> entries = stringRedisTemplate.opsForHash()
                 .entries(RedisConstants.ticketReservationKey(ticketId));
@@ -91,22 +93,22 @@ public class TicketStockCacheInitializer implements ApplicationRunner {
             return;
         }
         long cutoff = Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP - ORPHAN_GRACE_SECONDS;
-        List<Long> candidates = entries.values().stream()
+        Set<Long> candidates = entries.values().stream()
                 .map(value -> Long.parseLong(value.toString()))
                 .filter(id -> (id >> RedisIdWorker.COUNT_BITS) < cutoff)
-                .toList();
+                .collect(Collectors.toSet());
         if (candidates.isEmpty()) {
             return;
         }
-        Set<Long> persisted = ticketReservationMapper.selectBatchIds(candidates).stream()
+        Set<Long> persisted = ticketReservationMapper.selectBatchIds(new ArrayList<>(candidates)).stream()
                 .map(TicketReservation::getId)
                 .collect(Collectors.toSet());
         entries.forEach((userId, value) -> {
             long reservationId = Long.parseLong(value.toString());
             if (candidates.contains(reservationId) && !persisted.contains(reservationId)) {
-                reservationScript.rollback(ticketId, Long.parseLong(userId.toString()), reservationId);
-                log.warn("回补无预约记录的 Redis 占用，ticketId={}, userId={}, reservationId={}",
-                        ticketId, userId, reservationId);
+                Long result = reservationScript.rollback(ticketId, Long.parseLong(userId.toString()), reservationId);
+                log.warn("回补无预约记录的 Redis 占用，ticketId={}, userId={}, reservationId={}, result={}",
+                        ticketId, userId, reservationId, result);
             }
         });
     }

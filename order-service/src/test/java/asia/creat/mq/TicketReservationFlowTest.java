@@ -403,7 +403,7 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
     @Test
     @DisplayName("重启回补过了宽限期仍无预约记录的 Redis 占用，宽限期内的不动")
     void restartReleasesOrphanedAdmissions() {
-        long staleId = (Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP - 300) << RedisIdWorker.COUNT_BITS | 1;
+        long staleId = (Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP - 1200) << RedisIdWorker.COUNT_BITS | 1;
         long freshId = (Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP) << RedisIdWorker.COUNT_BITS | 2;
         assertEquals(0L, script.reserve(TICKET_ID, USER_ID, staleId));
         assertEquals(0L, script.reserve(TICKET_ID, USER_ID + 1, freshId));

@@ -229,10 +229,10 @@ docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml ps
 
 没有 `depends_on` 不代表自动等待外部中间件就绪。启动失败时先看 `docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml logs --tail 100`；`restart: unless-stopped` 只在进程退出时重启，不会因 healthcheck 变成 unhealthy 自动重启。固定端口映射适合每台主机各一套，不要直接 `--scale`；同主机另起一套时需更换项目名和全部宿主机端口。中间件服务器同时作为应用节点时，默认的 8080、5173 常被其他项目占用，改 `BACKEND_HOST_PORT`、`FRONTEND_HOST_PORT` 等即可。
 
-`deploy/verify-multinode.sh` 自动做三档验收：从 Nacos 读注册表确认每个服务各有两个 healthy 实例、两侧 Gateway 容器直连对端 API、分别经两台 Gateway 各打 20 次请求并用容器内 actuator 的 `http.server.requests` 计数统计每个节点实际处理了多少次。在节点 B 上运行，通过 SSH 读取节点 A 的容器计数，脚本开头的 `SERVER_SSH`、`SERVER_IP`、`LOCAL_IP`、`GW_B_PORT` 按实际环境覆盖：
+`deploy/verify-multinode.sh` 自动做三档验收：从 Nacos 读注册表确认每个服务各有两个 healthy 实例、两侧 Gateway 容器直连对端 API、分别经两台 Gateway 各打 20 次请求并用容器内 actuator 的 `http.server.requests` 计数统计每个节点实际处理了多少次。在节点 B 上运行，通过 SSH 读取节点 A 的容器计数，`SERVER_SSH`、`SERVER_IP`、`LOCAL_IP` 必填，`GW_B_PORT`、`NACOS_PORT` 不是默认值时另传：
 
 ```bash
-SERVER_IP=10.0.0.10 LOCAL_IP=10.0.0.22 GW_B_PORT=8080 bash deploy/verify-multinode.sh
+SERVER_SSH=user@10.0.0.10 SERVER_IP=10.0.0.10 LOCAL_IP=10.0.0.22 bash deploy/verify-multinode.sh
 ```
 
-实测结果：四组各 20 次请求全部 10/10 落到两个节点，零错误。`/event/hot` 走 `ticket-center-api`，未登录的 `/ticket/list/1` 由 `order-service` 返回 401，两条路径都经 Gateway 的 `lb://` 轮询分发。验收后再手工经两台前端验证登录态共享、预约到支付/取消链路及图片访问；停止一台应用节点后实测 Nacos 立即摘除该实例（容器 stop 时主动注销），另一台 Gateway 立即和 45 秒后各 20 次请求全部 200。
+实测结果：四组各 20 次请求全部 10/10 落到两个节点，零错误。`/event/hot` 走 `ticket-center-api`，未登录的 `/ticket-orders/me` 由 `order-service` 返回 401，两条路径都经 Gateway 的 `lb://` 轮询分发。验收后再手工经两台前端验证登录态共享、预约到支付/取消链路及图片访问；停止一台应用节点后实测 Nacos 立即摘除该实例（容器 stop 时主动注销），另一台 Gateway 立即和 45 秒后各 20 次请求全部 200。
