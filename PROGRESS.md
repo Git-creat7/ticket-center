@@ -223,12 +223,10 @@
 
 ### 17. 拆分后详情慢 3 倍、秒杀慢 4.5 倍
 
-- **详情**：`EventServiceImpl.queryById` 命中聚合缓存后还调 `orderClient.queryTickets` 经 Feign 查订单库。改为详情页不带票档，票档列表由前端单独请求订单服务。1,376 → 2,511 ~ 3,584 QPS。
-- **秒杀**：`TicketReservationServiceImpl.reserveTicket` 先落库、恢复任务再跑 Lua，被拒的请求也进事务排票档行锁。改为 Lua 预扣放在受理最前面，售罄在 Redis 就拒掉，只有放行的请求进事务，事务失败按预约号回补。223 → 728 QPS。
-- **Lua 前置带来的漏洞**：Redis 扣成功、MySQL 提交前进程退出，会留下没有预约记录的占用，`initialize_ticket_stock.lua` 只在库存键丢失时重建，修不了。`TicketStockCacheInitializer.initialize` 启动时扫预约 hash，受理超过 60 秒且库里查不到的按预约号回补。
-- **出票延迟**：建单只靠每秒一次的 `TicketReservationTaskProcessor` 扫描。受理事务 `afterCommit` 后直接推一次，扫描保留兜底；受理到出票 225 ~ 278 ms。
-- **票档信息缓存**：受理路径的票档状态、价格、销售时间读 30 秒 Redis Hash。单独测不出收益，落在噪声里。
-- **踩坑**：处理器与服务互相依赖，`@Lazy` + `lombok.config` 本地测试全绿、镜像里启动失败，Dockerfile 只拷模块目录不拷根目录文件。改用 `ObjectProvider`。
+- **详情**：命中缓存后还经 Feign 查订单库拿票档。票档从详情页拆出，前端单独请求。1,376 → 2,511 ~ 3,584 QPS。
+- **秒杀**：被拒的请求也进事务排票档行锁。Lua 预扣挪到受理最前面，售罄直接拒，只有放行的进事务。223 → 728 QPS。
+- **Lua 前置的漏洞**：Redis 扣了、落库前崩溃会留下孤儿占用。启动预热时按预约号里的时间戳扫 hash，超 60 秒且库里没有的回补。
+- **出票延迟**：原来只靠每秒扫描。事务提交后直接推一次，受理到出票 225 ~ 278 ms。
 
 ## 其余已定位未修项
 
