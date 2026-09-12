@@ -10,6 +10,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.lifecycle.Startables;
+import org.testcontainers.utility.MountableFile;
 
 /** Shared infrastructure for Spring integration tests. */
 @ActiveProfiles("testcontainers")
@@ -29,7 +30,9 @@ public abstract class IntegrationTestcontainers {
             .withDatabaseName("ticket_order")
             .withUsername("ticket_order")
             .withPassword(MYSQL_PASSWORD)
-            .withInitScript("db/order.sql");
+            // 建表 SQL 只在 deploy/ 维护一份，测试也从那里取。
+            .withCopyFileToContainer(MountableFile.forHostPath("../deploy/mysql/02-order.sql"),
+                    "/docker-entrypoint-initdb.d/init.sql");
 
     protected static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine")
             .withExposedPorts(6379)

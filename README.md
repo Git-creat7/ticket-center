@@ -137,7 +137,6 @@ ticket-center/
 ├─ ticket-center-api/              用户、活动与社区服务，ticket_center 库
 ├─ order-service/                  交易与积分服务，ticket_order 库
 │  ├─ src/main/resources/lua/      库存初始化、预扣、回补脚本
-│  ├─ src/main/resources/db/       交易库 SQL
 │  └─ src/test/                    预约、候补、订单一致性测试
 ├─ ticket-gateway/                 统一入口与服务路由
 ├─ ticket-center-web/              Vue 3 用户端
