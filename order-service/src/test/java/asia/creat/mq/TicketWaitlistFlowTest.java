@@ -306,14 +306,16 @@ class TicketWaitlistFlowTest extends IntegrationTestcontainers {
     }
 
     @Test
-    @DisplayName("已受理但尚未占票的普通请求不能越过候补领取释放名额")
+    @DisplayName("售罄时普通请求在受理阶段被拒，不会抢在候补前占位")
     void acceptedRequestCannotJumpQueue() {
         login(SECOND);
-        Long pending = reservationService.reserveTicket(TICKET_ID, false, "accepted-before-queue");
+        assertThrows(BusinessException.class,
+                () -> reservationService.reserveTicket(TICKET_ID, false, "accepted-before-queue"));
+        assertEquals(1, reservationMapper.selectCount(new LambdaQueryWrapper<TicketReservation>()
+                .eq(TicketReservation::getTicketId, TICKET_ID)));
         Long first = join(FIRST);
         releaseOwner();
         processor.processTasks();
-        assertEquals(TicketReservation.FAILED, reservationMapper.selectById(pending).getStatus());
         assertStock(1);
         waitlistService.processWaitlists();
         consume(entry(first).getReservationId());
@@ -430,6 +432,6 @@ class TicketWaitlistFlowTest extends IntegrationTestcontainers {
 
     private List<String> keys() {
         return List.of(RedisConstants.ticketStockKey(TICKET_ID), RedisConstants.ticketOrderKey(TICKET_ID),
-                RedisConstants.ticketReservationKey(TICKET_ID));
+                RedisConstants.ticketReservationKey(TICKET_ID), RedisConstants.ticketInfoKey(TICKET_ID));
     }
 }

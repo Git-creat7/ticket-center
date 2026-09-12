@@ -235,4 +235,4 @@ docker compose -p ticket-app --env-file .env -f docker-compose.app-prod.yml ps
 SERVER_IP=10.0.0.10 LOCAL_IP=10.0.0.22 GW_B_PORT=8080 bash deploy/verify-multinode.sh
 ```
 
-实测结果：四组各 20 次请求全部 10/10 落到两个节点，零错误。`/event/hot` 走 `ticket-center-api`，未登录的 `/ticket/list/1` 由 `order-service` 返回 401，两条路径都经 Gateway 的 `lb://` 轮询分发。验收后再手工经两台前端验证登录态共享、预约到支付/取消链路及图片访问；停止一台应用节点检查 Nacos 实例摘除与剩余节点继续服务，这一项尚未做，通过前不要宣称多机容错已验收。
+实测结果：四组各 20 次请求全部 10/10 落到两个节点，零错误。`/event/hot` 走 `ticket-center-api`，未登录的 `/ticket/list/1` 由 `order-service` 返回 401，两条路径都经 Gateway 的 `lb://` 轮询分发。验收后再手工经两台前端验证登录态共享、预约到支付/取消链路及图片访问；停止一台应用节点后实测 Nacos 立即摘除该实例（容器 stop 时主动注销），另一台 Gateway 立即和 45 秒后各 20 次请求全部 200。

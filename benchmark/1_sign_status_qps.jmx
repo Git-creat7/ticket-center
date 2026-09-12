@@ -59,17 +59,16 @@
           </elementProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <JSR223Assertion guiclass="TestBeanGUI" testclass="JSR223Assertion" testname="Check sign status">
-            <stringProp name="scriptLanguage">groovy</stringProp>
-            <stringProp name="cacheKey">true</stringProp>
-            <stringProp name="script"><![CDATA[
-def result = new groovy.json.JsonSlurper().parseText(prev.getResponseDataAsString())
-if (prev.getResponseCode() != '200' || result.code != 200 || !(result.data instanceof Map)) {
-    AssertionResult.setFailure(true)
-    AssertionResult.setFailureMessage('Sign status failed: ' + result.msg)
-}
-]]></stringProp>
-          </JSR223Assertion>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Check sign status">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="code">"code":200</stringProp>
+              <stringProp name="data">"data":{</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message"></stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
           <hashTree/>
         </hashTree>
       </hashTree>

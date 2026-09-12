@@ -9,3 +9,5 @@ spring:
     virtual-host: /
 ticket:
   internal-token: test-internal-token
+  reservation:
+    immediate-dispatch: false

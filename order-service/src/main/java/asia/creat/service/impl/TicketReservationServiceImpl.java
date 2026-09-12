@@ -16,6 +16,7 @@ import asia.creat.mapper.TicketOrderMapper;
 import asia.creat.mapper.TicketReservationMapper;
 import asia.creat.mapper.TicketStockMapper;
 import asia.creat.mapper.TicketWaitlistMapper;
+import asia.creat.mq.TicketReservationTaskProcessor;
 import asia.creat.service.TicketReservationService;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.RedisIdWorker;
@@ -28,13 +29,16 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,6 +60,9 @@ public class TicketReservationServiceImpl implements TicketReservationService {
     private final TransactionTemplate transactionTemplate;
     private final TicketReservationScript reservationScript;
     private final TicketStockCacheInitializer stockCacheInitializer;
+    private final StringRedisTemplate stringRedisTemplate;
+    // 处理器反向依赖本服务，延迟取用打破循环。
+    private final ObjectProvider<TicketReservationTaskProcessor> taskProcessor;
 
     @Override
     public Long reserveTicket(Long ticketId, Boolean useCredits, String requestId) {
@@ -65,7 +72,7 @@ public class TicketReservationServiceImpl implements TicketReservationService {
             throw new BusinessException(400, "预约请求标识格式不正确");
         }
         boolean credits = Boolean.TRUE.equals(useCredits);
-        // 服务端生成的请求号不可能已存在，客户端带 requestId 重试时才查幂等记录。
+        // 服务端生成的请求号不会有历史记录。
         TicketReservation existing = requestId == null ? null : findRequest(userId, idempotencyKey);
         if (existing != null) {
             return checkRequest(existing, ticketId, credits);
@@ -80,22 +87,21 @@ public class TicketReservationServiceImpl implements TicketReservationService {
             throw new BusinessException("已有有效预约，请查看预约记录");
         }
 
-        Ticket ticket = ticketMapper.selectById(ticketId);
+        Ticket ticket = loadTicketInfo(ticketId);
         if (ticket == null) {
             throw new BusinessException(404, "票档不存在");
         }
         if (!Integer.valueOf(1).equals(ticket.getStatus())) {
             throw new BusinessException("票档已下架");
         }
-        TicketStock stock = stockMapper.selectById(ticketId);
-        if (stock == null) {
+        if (ticket.getBeginTime() == null) {
             throw new BusinessException("票档库存信息不存在");
         }
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(stock.getBeginTime())) {
+        if (now.isBefore(ticket.getBeginTime())) {
             throw new BusinessException("预约尚未开始");
         }
-        if (!now.isBefore(stock.getEndTime())) {
+        if (!now.isBefore(ticket.getEndTime())) {
             throw new BusinessException("预约已经结束");
         }
 
@@ -110,14 +116,12 @@ public class TicketReservationServiceImpl implements TicketReservationService {
         reservation.setStatus(TicketReservation.PROCESSING);
         reservation.setReleasePending(false);
 
-        // 先在 Redis 预扣，库存不足在这里就拒掉，不进 MySQL 事务、不排票档行锁。
-        // 脚本按预约号幂等，恢复任务里 reserveStock 再跑一次不会重复扣减。
+        // 售罄在 Redis 就拒掉，不进事务、不排行锁；脚本按预约号幂等，恢复任务重跑不会重复扣。
         Long admitted = reserveInRedis(reservation);
         if (Long.valueOf(1).equals(admitted)) {
             throw new BusinessException("库存不足");
         }
-        // 返回 2 是同一用户在 Redis 里已挂着别的预约号：可能是并发的同一请求尚未提交，也可能是残留记录，
-        // 都交给事务里的唯一约束判定；这种情况没有预扣，事务失败也不需要回补。
+        // 返回 2 时没有预扣，同一用户的并发或残留记录交给唯一约束判定。
         boolean deducted = Long.valueOf(0).equals(admitted);
         if (!deducted && !Long.valueOf(2).equals(admitted)) {
             throw new IllegalStateException("Redis 预约状态暂不可用");
@@ -130,6 +134,7 @@ public class TicketReservationServiceImpl implements TicketReservationService {
                 }
                 reservationMapper.insert(reservation);
                 taskMapper.add(reservation.getId(), ReservationTask.SEND_ORDER);
+                taskProcessor.getObject().triggerAfterCommit(reservation.getId(), ReservationTask.SEND_ORDER);
             });
         } catch (DuplicateKeyException e) {
             if (deducted) {
@@ -177,9 +182,47 @@ public class TicketReservationServiceImpl implements TicketReservationService {
         try {
             reservationScript.rollback(reservation.getTicketId(), reservation.getUserId(), reservation.getId());
         } catch (RuntimeException e) {
-            // 回补失败只是预扣泄漏，重启预热会对齐；不能盖掉调用方原本的异常。
+            // 回补失败只记录，不能盖掉调用方原本的异常。
             log.warn("预约落库失败后 Redis 回补失败，reservationId={}", reservation.getId(), e);
         }
+    }
+
+    // 票档没有修改入口，短 TTL 只是给以后留余量；库存数不在这里，仍由 Redis 库存键说话。
+    private Ticket loadTicketInfo(Long ticketId) {
+        String key = RedisConstants.ticketInfoKey(ticketId);
+        Map<Object, Object> cached = stringRedisTemplate.opsForHash().entries(key);
+        if (!cached.isEmpty()) {
+            if (cached.containsKey("missing")) {
+                return null;
+            }
+            Ticket ticket = new Ticket();
+            ticket.setId(ticketId);
+            ticket.setStatus(Integer.valueOf(cached.get("status").toString()));
+            ticket.setPrice(Long.valueOf(cached.get("price").toString()));
+            if (cached.containsKey("beginTime")) {
+                ticket.setBeginTime(LocalDateTime.parse(cached.get("beginTime").toString()));
+                ticket.setEndTime(LocalDateTime.parse(cached.get("endTime").toString()));
+            }
+            return ticket;
+        }
+        Ticket ticket = ticketMapper.selectById(ticketId);
+        Map<String, String> fields = new HashMap<>();
+        if (ticket == null) {
+            fields.put("missing", "1");
+        } else {
+            fields.put("status", ticket.getStatus().toString());
+            fields.put("price", ticket.getPrice().toString());
+            TicketStock stock = stockMapper.selectById(ticketId);
+            if (stock != null) {
+                ticket.setBeginTime(stock.getBeginTime());
+                ticket.setEndTime(stock.getEndTime());
+                fields.put("beginTime", stock.getBeginTime().toString());
+                fields.put("endTime", stock.getEndTime().toString());
+            }
+        }
+        stringRedisTemplate.opsForHash().putAll(key, fields);
+        stringRedisTemplate.expire(key, ticket == null ? RedisConstants.CACHE_NULL_TTL : RedisConstants.CACHE_TICKET_INFO_TTL);
+        return ticket;
     }
 
     private TicketReservation findRequest(Long userId, String requestId) {

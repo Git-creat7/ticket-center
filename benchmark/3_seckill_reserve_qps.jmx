@@ -65,22 +65,28 @@
           </elementProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <JSR223Assertion guiclass="TestBeanGUI" testclass="JSR223Assertion" testname="Check reservation result">
-            <stringProp name="scriptLanguage">groovy</stringProp>
-            <stringProp name="cacheKey">true</stringProp>
-            <stringProp name="script"><![CDATA[
-vars.put('reservation_id', '')
-def result = new groovy.json.JsonSlurper().parseText(prev.getResponseDataAsString())
-boolean accepted = result.code == 200 && result.data?.toString() ==~ /[0-9]+/
-boolean duplicate = result.code == 500 && result.msg == '已有有效预约，请查看预约记录'
-if (prev.getResponseCode() != '200' || (!accepted && !duplicate)) {
-    AssertionResult.setFailure(true)
-    AssertionResult.setFailureMessage('Reservation failed: ' + result.msg)
-} else if (accepted) {
-    vars.put('reservation_id', result.data.toString())
-}
-]]></stringProp>
-          </JSR223Assertion>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Extract reservation id">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">reservation_id</stringProp>
+            <stringProp name="RegexExtractor.regex">"data":(\d+)</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default"></stringProp>
+            <boolProp name="RegexExtractor.default_empty_value">true</boolProp>
+            <stringProp name="RegexExtractor.match_number">1</stringProp>
+          </RegexExtractor>
+          <hashTree/>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Check reservation result">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="accepted">"code":200</stringProp>
+              <stringProp name="duplicate">"msg":"已有有效预约，请查看预约记录"</stringProp>
+              <stringProp name="soldout">"msg":"库存不足"</stringProp>
+              <stringProp name="limited">"msg":"每个用户限购一张"</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message"></stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">48</intProp>
+          </ResponseAssertion>
           <hashTree/>
         </hashTree>
       </hashTree>

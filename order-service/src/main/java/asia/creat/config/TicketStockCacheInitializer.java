@@ -7,6 +7,8 @@ import asia.creat.mapper.TicketOrderMapper;
 import asia.creat.mapper.TicketReservationMapper;
 import asia.creat.mapper.TicketStockMapper;
 import asia.creat.utils.RedisConstants;
+import asia.creat.utils.RedisIdWorker;
+import asia.creat.utils.TicketReservationScript;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,10 +20,13 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 // 启动时补齐 Redis 预约资格和库存键。
 @Slf4j
@@ -34,6 +39,9 @@ public class TicketStockCacheInitializer implements ApplicationRunner {
     private final TicketReservationMapper ticketReservationMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final TicketReservationScript reservationScript;
+
+    private static final long ORPHAN_GRACE_SECONDS = 60;
 
     private static final DefaultRedisScript<Long> INITIALIZE_SCRIPT = new DefaultRedisScript<>();
 
@@ -71,6 +79,35 @@ public class TicketStockCacheInitializer implements ApplicationRunner {
             stringRedisTemplate.execute(INITIALIZE_SCRIPT,
                     List.of(RedisConstants.ticketStockKey(ticketId), RedisConstants.ticketOrderKey(ticketId),
                             RedisConstants.ticketReservationKey(ticketId)), args.toArray());
+            releaseOrphans(ticketId);
+        });
+    }
+
+    // 受理时先在 Redis 预扣，落库前进程退出会留下没有预约记录的占用；预约号里带受理时刻，过了宽限期还查不到就回补。
+    private void releaseOrphans(Long ticketId) {
+        Map<Object, Object> entries = stringRedisTemplate.opsForHash()
+                .entries(RedisConstants.ticketReservationKey(ticketId));
+        if (entries.isEmpty()) {
+            return;
+        }
+        long cutoff = Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP - ORPHAN_GRACE_SECONDS;
+        List<Long> candidates = entries.values().stream()
+                .map(value -> Long.parseLong(value.toString()))
+                .filter(id -> (id >> RedisIdWorker.COUNT_BITS) < cutoff)
+                .toList();
+        if (candidates.isEmpty()) {
+            return;
+        }
+        Set<Long> persisted = ticketReservationMapper.selectBatchIds(candidates).stream()
+                .map(TicketReservation::getId)
+                .collect(Collectors.toSet());
+        entries.forEach((userId, value) -> {
+            long reservationId = Long.parseLong(value.toString());
+            if (candidates.contains(reservationId) && !persisted.contains(reservationId)) {
+                reservationScript.rollback(ticketId, Long.parseLong(userId.toString()), reservationId);
+                log.warn("回补无预约记录的 Redis 占用，ticketId={}, userId={}, reservationId={}",
+                        ticketId, userId, reservationId);
+            }
         });
     }
 }

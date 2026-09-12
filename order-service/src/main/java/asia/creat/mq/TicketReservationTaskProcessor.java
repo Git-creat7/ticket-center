@@ -6,13 +6,18 @@ import asia.creat.entity.TicketReservation;
 import asia.creat.mapper.ReservationTaskMapper;
 import asia.creat.mapper.TicketReservationMapper;
 import asia.creat.service.TicketReservationService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 @Slf4j
 @Component
@@ -24,27 +29,60 @@ public class TicketReservationTaskProcessor {
     private final TicketReservationService reservationService;
     private final TicketOrderProducer orderProducer;
     private final TransactionTemplate transactionTemplate;
+    // 测试按步骤驱动任务，关掉即时推送。
+    @Value("${ticket.reservation.immediate-dispatch:true}")
+    private boolean immediate;
+    // 即时推送只是让"处理中"更快结束，队列堆积时由定时扫描兜住。
+    private final Executor executor = Executors.newFixedThreadPool(4, runnable -> {
+        Thread thread = new Thread(runnable, "reservation-task");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Scheduled(fixedDelay = 1000)
     public void processTasks() {
-        List<ReservationTask> tasks = taskMapper.findDueTasks();
-        for (ReservationTask task : tasks) {
-            if (taskMapper.claim(task.getId()) != 1) {
-                continue;
+        for (ReservationTask task : taskMapper.findDueTasks()) {
+            process(task);
+        }
+    }
+
+    // 受理事务提交后直接推一次，不等下一轮扫描；claim 的条件更新保证和扫描不会重复处理。
+    public void triggerAfterCommit(Long reservationId, int type) {
+        if (!immediate || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                executor.execute(() -> {
+                    ReservationTask task = taskMapper.selectOne(new LambdaQueryWrapper<ReservationTask>()
+                            .eq(ReservationTask::getReservationId, reservationId)
+                            .eq(ReservationTask::getType, type)
+                            .eq(ReservationTask::getStatus, 0));
+                    if (task != null) {
+                        process(task);
+                    }
+                });
             }
-            try {
-                if (task.getType() == ReservationTask.SEND_ORDER) {
-                    transactionTemplate.executeWithoutResult(status -> processOrder(task));
-                } else if (task.getType() == ReservationTask.RELEASE) {
-                    reservationService.releaseReservation(task.getReservationId());
-                } else {
-                    taskMapper.complete(task.getReservationId(), task.getType());
-                }
-            } catch (Exception e) {
-                taskMapper.recordError(task.getId(), shorten(e.getMessage()));
-                log.warn("预约恢复任务处理失败，taskId={}, reservationId={}",
-                        task.getId(), task.getReservationId(), e);
+        });
+    }
+
+    private void process(ReservationTask task) {
+        if (taskMapper.claim(task.getId()) != 1) {
+            return;
+        }
+        try {
+            if (task.getType() == ReservationTask.SEND_ORDER) {
+                transactionTemplate.executeWithoutResult(status -> processOrder(task));
+            } else if (task.getType() == ReservationTask.RELEASE) {
+                reservationService.releaseReservation(task.getReservationId());
+            } else {
+                taskMapper.complete(task.getReservationId(), task.getType());
             }
+        } catch (Exception e) {
+            taskMapper.recordError(task.getId(), shorten(e.getMessage()));
+            log.warn("预约恢复任务处理失败，taskId={}, reservationId={}",
+                    task.getId(), task.getReservationId(), e);
         }
     }
 

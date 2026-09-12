@@ -16,6 +16,7 @@ import asia.creat.mapper.TicketOrderMapper;
 import asia.creat.mapper.TicketReservationMapper;
 import asia.creat.mapper.TicketStockMapper;
 import asia.creat.mapper.TicketWaitlistMapper;
+import asia.creat.mq.TicketReservationTaskProcessor;
 import asia.creat.service.TicketWaitlistService;
 import asia.creat.utils.RedisConstants;
 import asia.creat.utils.RedisIdWorker;
@@ -26,6 +27,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -49,6 +51,8 @@ public class TicketWaitlistServiceImpl implements TicketWaitlistService {
     private final TransactionTemplate transactionTemplate;
     private final TicketStockCacheInitializer stockCacheInitializer;
     private final StringRedisTemplate redis;
+    // 处理器反向依赖本服务，延迟取用打破循环。
+    private final ObjectProvider<TicketReservationTaskProcessor> taskProcessor;
     private final RedisIdWorker idWorker;
 
     @Override
@@ -212,6 +216,7 @@ public class TicketWaitlistServiceImpl implements TicketWaitlistService {
         reservation.setReleasePending(false);
         reservationMapper.insert(reservation);
         taskMapper.add(reservation.getId(), ReservationTask.SEND_ORDER);
+        taskProcessor.getObject().triggerAfterCommit(reservation.getId(), ReservationTask.SEND_ORDER);
         head.setReservationId(reservation.getId());
         head.setStatus(TicketWaitlist.ALLOCATING);
         waitlistMapper.updateById(head);

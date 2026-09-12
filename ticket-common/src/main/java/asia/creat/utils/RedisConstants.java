@@ -58,6 +58,12 @@ public class RedisConstants {
         return PROJECT_KEY_PREFIX + "ticket:{" + ticketId + "}:reservation";
     }
 
+    // 受理路径读票档状态、价格和销售时间用的短缓存。
+    public static String ticketInfoKey(Object ticketId) {
+        return PROJECT_KEY_PREFIX + "ticket:{" + ticketId + "}:info";
+    }
+    public static final Duration CACHE_TICKET_INFO_TTL = Duration.ofSeconds(30);
+
     // 订单超时（分钟）：超过该时长未支付则取消并释放库存
     public static final Duration ORDER_TIMEOUT = Duration.ofMinutes(15);
 

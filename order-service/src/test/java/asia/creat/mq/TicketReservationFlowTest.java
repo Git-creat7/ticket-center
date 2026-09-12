@@ -37,6 +37,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -181,13 +182,13 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
     @ValueSource(booleans = {false, true})
     @DisplayName("两个请求都未查到预约时，由唯一约束保证只创建一笔")
     void concurrentRequestsStillCreateOneReservation(boolean sameRequest) throws Exception {
-        TicketStock stock = stockMapper.selectById(TICKET_ID);
-        CountDownLatch stockReads = new CountDownLatch(2);
+        Ticket ticket = ticketMapper.selectById(TICKET_ID);
+        CountDownLatch ticketReads = new CountDownLatch(2);
         doAnswer(invocation -> {
-            stockReads.countDown();
-            assertTrue(stockReads.await(5, TimeUnit.SECONDS));
-            return stock;
-        }).when(stockMapper).selectById(TICKET_ID);
+            ticketReads.countDown();
+            assertTrue(ticketReads.await(5, TimeUnit.SECONDS));
+            return ticket;
+        }).when(ticketMapper).selectById(TICKET_ID);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             List<Future<Long>> results = new ArrayList<>();
@@ -233,11 +234,13 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
     }
 
     @Test
-    @DisplayName("重启不会给尚未预扣的预约补上占票记录")
-    void restartBeforePreDeductionStillDeductsStock() {
-        reservationService.reserveTicket(TICKET_ID, false, "before-reserve");
+    @DisplayName("受理时已预扣，重启后恢复任务再跑不会重复扣库存")
+    void restartAfterAdmissionDoesNotDeductTwice() {
+        Long id = reservationService.reserveTicket(TICKET_ID, false, "before-reserve");
+        assertEquals("1", redis.opsForValue().get(RedisConstants.ticketStockKey(TICKET_ID)));
         initializer.run(null);
-        assertNull(redis.opsForHash().get(RedisConstants.ticketReservationKey(TICKET_ID), String.valueOf(USER_ID)));
+        assertEquals(id.toString(), redis.opsForHash().get(
+                RedisConstants.ticketReservationKey(TICKET_ID), String.valueOf(USER_ID)));
         processor.processTasks();
         assertEquals("1", redis.opsForValue().get(RedisConstants.ticketStockKey(TICKET_ID)));
     }
@@ -372,19 +375,46 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
     }
 
     @Test
-    @DisplayName("售罄预约有明确失败结果，不会凭空回补库存")
-    void soldOutReservationHasFinalResult() {
+    @DisplayName("售罄请求在受理时就被拒绝，不落库也不占资格")
+    void soldOutReservationIsRejectedAtAdmission() {
         stockMapper.update(null, new LambdaUpdateWrapper<TicketStock>()
                 .eq(TicketStock::getTicketId, TICKET_ID).set(TicketStock::getStock, 0));
         redis.opsForValue().set(RedisConstants.ticketStockKey(TICKET_ID), "0");
-        Long id = reservationService.reserveTicket(TICKET_ID, false, "sold-out");
-        processor.processTasks();
-        processor.processTasks();
-        assertEquals(TicketReservation.FAILED, reservationService.getReservation(id).getStatus());
-        assertEquals("库存不足", reservationService.getReservation(id).getFailureReason());
-        assertFalse(reservationMapper.selectById(id).getReleasePending());
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> reservationService.reserveTicket(TICKET_ID, false, "sold-out"));
+        assertEquals("库存不足", error.getMessage());
+        assertEquals(0, reservationMapper.selectCount(new LambdaQueryWrapper<TicketReservation>()
+                .eq(TicketReservation::getTicketId, TICKET_ID)));
+        assertNull(redis.opsForHash().get(RedisConstants.ticketReservationKey(TICKET_ID), String.valueOf(USER_ID)));
         verify(producer, never()).send(any());
         assertStock(0);
+    }
+
+    @Test
+    @DisplayName("落库失败时回补受理阶段的预扣")
+    void admissionIsRolledBackWhenPersistFails() {
+        doThrow(new IllegalStateException("db unavailable")).when(taskMapper).add(any(), eq(ReservationTask.SEND_ORDER));
+        assertThrows(IllegalStateException.class,
+                () -> reservationService.reserveTicket(TICKET_ID, false, "persist-fail"));
+        assertNull(redis.opsForHash().get(RedisConstants.ticketReservationKey(TICKET_ID), String.valueOf(USER_ID)));
+        assertStock(2);
+    }
+
+    @Test
+    @DisplayName("重启回补过了宽限期仍无预约记录的 Redis 占用，宽限期内的不动")
+    void restartReleasesOrphanedAdmissions() {
+        long staleId = (Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP - 300) << RedisIdWorker.COUNT_BITS | 1;
+        long freshId = (Instant.now().getEpochSecond() - RedisIdWorker.BEGIN_TIMESTAMP) << RedisIdWorker.COUNT_BITS | 2;
+        assertEquals(0L, script.reserve(TICKET_ID, USER_ID, staleId));
+        assertEquals(0L, script.reserve(TICKET_ID, USER_ID + 1, freshId));
+        assertEquals("0", redis.opsForValue().get(RedisConstants.ticketStockKey(TICKET_ID)));
+
+        initializer.run(null);
+
+        assertNull(redis.opsForHash().get(RedisConstants.ticketReservationKey(TICKET_ID), String.valueOf(USER_ID)));
+        assertEquals(String.valueOf(freshId), redis.opsForHash().get(
+                RedisConstants.ticketReservationKey(TICKET_ID), String.valueOf(USER_ID + 1)));
+        assertEquals("1", redis.opsForValue().get(RedisConstants.ticketStockKey(TICKET_ID)));
     }
 
     @Test
@@ -560,6 +590,6 @@ class TicketReservationFlowTest extends IntegrationTestcontainers {
 
     private List<String> keys() {
         return List.of(RedisConstants.ticketStockKey(TICKET_ID), RedisConstants.ticketOrderKey(TICKET_ID),
-                RedisConstants.ticketReservationKey(TICKET_ID));
+                RedisConstants.ticketReservationKey(TICKET_ID), RedisConstants.ticketInfoKey(TICKET_ID));
     }
 }
